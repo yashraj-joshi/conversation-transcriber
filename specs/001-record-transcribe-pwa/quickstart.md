@@ -1,0 +1,44 @@
+# Quickstart & Validation Guide
+
+## Prerequisites
+
+- AWS CLI v2 configured for the target account (`aws sts get-caller-identity` works)
+- Terraform ≥ 1.6, Python 3.11+
+- An OpenAI API key with platform credits
+
+## 1. Local gates
+
+```bash
+python3 -m unittest discover -s backend/tests -t backend     # all tests pass
+terraform -chdir=infra fmt -check && terraform -chdir=infra init -backend=false && terraform -chdir=infra validate
+```
+
+## 2. Deploy
+
+```bash
+cp infra/terraform.tfvars.example infra/terraform.tfvars    # edit region/project if desired
+terraform -chdir=infra init
+terraform -chdir=infra apply
+./scripts/set-openai-key.sh                                  # prompts for the key; stores it in SSM
+./scripts/create-user.sh you@example.com                     # prompts for a password
+terraform -chdir=infra output app_url
+```
+
+## 3. Validation scenarios
+
+| # | Scenario | Expected |
+|---|----------|----------|
+| V1 (US2) | Open `app_url` in iPhone Safari → Share → Add to Home Screen → launch | Full-screen app with its icon and name |
+| V2 (US1) | Sign in, Record ~60 s of speech, Stop | Status goes Uploading → Transcribing → Done; text is shown |
+| V3 (US1) | `aws s3 ls s3://$(terraform -chdir=infra output -raw data_bucket)/transcripts/ --recursive` | `transcripts/YYYY-MM/YYYY-MM-DD_HH-MM-SS_xxxxxxxx.txt` for the current local month |
+| V4 (US1) | Record > 10 min | At least 2 parts under `audio/<id>/`; one transcript containing all the speech |
+| V5 (US4) | Transcripts tab → month → item | Months newest first; items newest first; Copy/Share work |
+| V6 (US5) | Airplane mode → record → stop → network on → reopen app | Pending recording uploads and is transcribed |
+| V7 (Sec) | `curl $(terraform -chdir=infra output -raw api_url)/transcripts/months` without a token | HTTP 401 |
+| V8 (US3) | Open the **same** `app_url` in Chrome and in Safari on a Mac → sign in → record ~60 s with the built-in mic → Stop | Transcript lands in the same `transcripts/YYYY-MM/` folder as iPhone recordings; it appears in the Transcripts view on both devices |
+| V9 (US3) | On desktop Chrome, open a transcript; then resize the window from full width down to ~375 px | Wide: list and text side by side, Copy + Download (no Share). Narrow: single column, no horizontal scroll. No "Add to Home Screen" hint on desktop |
+
+## 4. Troubleshooting
+
+- Worker logs: `aws logs tail /aws/lambda/<project>-transcriber --follow`
+- API logs: `aws logs tail /aws/lambda/<project>-api --follow`

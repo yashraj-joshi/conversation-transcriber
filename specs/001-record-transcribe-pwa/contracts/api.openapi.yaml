@@ -1,0 +1,134 @@
+openapi: 3.0.3
+info:
+  title: Conversation Transcriber API
+  version: 1.0.0
+  description: >
+    HTTP API (API Gateway v2). Every route requires `Authorization: Bearer <Cognito ID token>`.
+    Errors use `{ "error": "<message>" }` with 400/401/404/409/500.
+security:
+  - cognito: []
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties: { error: { type: string } }
+    Status:
+      type: object
+      required: [recordingId, state]
+      properties:
+        recordingId: { type: string, format: uuid }
+        state: { type: string, enum: [pending, transcribing, done, failed] }
+        transcriptKey: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time }
+    TranscriptItem:
+      type: object
+      properties:
+        key: { type: string, example: transcripts/2026-11/2026-11-11_14-30-05_3f2c9a1b.txt }
+        name: { type: string, example: 2026-11-11_14-30-05_3f2c9a1b.txt }
+        recordedAt: { type: string, example: "2026-11-11 14:30:05" }
+        size: { type: integer }
+paths:
+  /uploads:
+    post:
+      summary: Get a presigned POST for one audio part
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recordingId, index, contentType]
+              properties:
+                recordingId: { type: string, format: uuid }
+                index: { type: integer, minimum: 0, maximum: 29 }
+                contentType: { type: string, example: audio/mp4 }
+      responses:
+        "200":
+          description: Presigned POST (send as multipart/form-data with `fields` then `file`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string }
+                  fields: { type: object, additionalProperties: { type: string } }
+                  key: { type: string, example: audio/3f2c.../part-000.mp4 }
+        "400": { description: Invalid input }
+  /recordings/{id}/complete:
+    post:
+      summary: Finalize a recording; writes the manifest that triggers transcription (idempotent, also used for retry)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [startedAt, tzOffsetMinutes, durationSeconds, partCount]
+              properties:
+                startedAt: { type: string, format: date-time }
+                tzOffsetMinutes: { type: integer, minimum: -840, maximum: 840 }
+                durationSeconds: { type: number, minimum: 1, maximum: 18000 }
+                partCount: { type: integer, minimum: 1, maximum: 30 }
+                title: { type: string, maxLength: 120 }
+      responses:
+        "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
+        "200": { description: Already transcribed, content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
+        "409": { description: One or more parts are missing in storage }
+  /recordings/{id}:
+    get:
+      summary: Transcription status
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Status (state `pending` when no status record exists yet), content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
+  /transcripts/months:
+    get:
+      summary: Month folders that contain transcripts, newest first
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  months: { type: array, items: { type: string, example: 2026-11 } }
+  /transcripts:
+    get:
+      summary: Transcripts in a month, sorted by recording date/time, newest first
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, pattern: "^\\d{4}-\\d{2}$" } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  month: { type: string }
+                  items: { type: array, items: { $ref: "#/components/schemas/TranscriptItem" } }
+  /transcript:
+    get:
+      summary: Full transcript text
+      parameters:
+        - { name: key, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key: { type: string }
+                  text: { type: string }
+        "404": { description: Not found }
