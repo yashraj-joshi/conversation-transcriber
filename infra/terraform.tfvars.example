@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars (git-ignored) and adjust.
+region  = "us-east-1"
+project = "conversation-transcriber"
+
+# Initial transcription model. After the first apply, change it with: ./scripts/set-model.sh <model>
+transcription_model = "microsoft/mai-transcribe-2"
+
+# "deny" = only providers that don't store/train on audio. Set "allow" only if OpenRouter reports no provider.
+openrouter_data_collection = "deny"
+
+speaker_labels         = false # true = "Speaker 1: …" turns, numbered per 5-minute part
+transcribe_parallelism = 4
+audio_retention_days   = 30
+log_retention_days     = 30
+
+# For local frontend development (python3 -m http.server -d frontend 8000):
+# extra_allowed_origins = ["http://localhost:8000"]

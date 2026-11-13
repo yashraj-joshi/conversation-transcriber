@@ -6,6 +6,11 @@
 
 ## Summary
 
+> **Amended 2026-11-13 by [002](../002-openrouter-transcription/plan.md):** transcription now goes through OpenRouter (model in SSM, custom vocabulary), and recording
+> uses Web Audio → 16 kHz WAV in 5-minute parts. `openai_client.py` became `openrouter_client.py`;
+> `set-openai-key.sh` became `set-openrouter-key.sh`. Where this plan disagrees with 002, 002 wins.
+
+
 An installable PWA records audio in the browser with `MediaRecorder`, splitting long conversations into
 10-minute parts. Each part is persisted to IndexedDB and uploaded straight to a private S3 bucket using
 a short-lived presigned POST from an authenticated API. When the recording is finished, the app posts a

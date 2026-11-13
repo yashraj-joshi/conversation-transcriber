@@ -1,0 +1,349 @@
+# Custom vocabulary (key terms) sent to the transcription model with every request.
+# One term per line. Blank lines and lines starting with "# " are ignored. Duplicates are removed.
+# Limits (OpenRouter `keyterms`): at most 1000 terms, each 1-100 characters.
+# Deploy changes with `terraform -chdir=infra apply` (or ./scripts/push-vocabulary.sh).
+
+# --- Python ---
+Python
+FastAPI
+Flask
+Django
+Jinja
+Pydantic
+SQLAlchemy
+Alembic
+Uvicorn
+Gunicorn
+ASGI
+WSGI
+asyncio
+async
+await
+event loop
+coroutine
+abstract method
+abstract base class
+decorator
+generator
+context manager
+type hints
+dataclass
+virtual environment
+venv
+pip
+requirements.txt
+pyproject.toml
+pytest
+fixture
+unit test
+integration test
+mocking
+Pandas
+NumPy
+Selenium
+Jupyter
+PyCharm
+PyInstaller
+Gradio
+Streamlit
+
+# --- .NET / Microsoft ---
+C#
+.NET Framework
+.NET Core
+ASP.NET
+WPF
+LINQ
+Entity Framework
+NuGet
+Visual Studio
+VS Code
+
+# --- Databases / SQL ---
+SQL Server
+T-SQL
+SSIS
+SSRS
+SSMS
+SQL Agent
+ETL
+stored procedure
+CTE
+indexing
+execution plan
+deadlock
+PostgreSQL
+pgvector
+SQLite
+MySQL
+NoSQL
+DynamoDB
+
+# --- APIs / web ---
+REST
+RESTful
+SOAP
+WSDL
+XML
+XSD
+XPath
+JSON
+YAML
+payload
+endpoint
+CRUD
+HTTP
+HTTPS
+status code
+idempotent
+idempotency
+pagination
+rate limiting
+middleware
+dependency injection
+OAuth2
+OpenID Connect
+JWT
+bearer token
+bcrypt
+hashing
+CORS
+API Gateway
+
+# --- AWS / cloud ---
+AWS
+Lambda
+S3
+SQS
+SNS
+EventBridge
+Step Functions
+EC2
+ECS
+Fargate
+ECR
+EKS
+RDS
+Aurora
+IAM
+VPC
+subnet
+security group
+CloudWatch
+CloudFormation
+CloudFront
+Route 53
+Cognito
+Secrets Manager
+Parameter Store
+KMS
+IoT Core
+Bedrock
+SageMaker
+serverless
+cold start
+Terraform
+infrastructure as code
+Docker
+Dockerfile
+Docker Compose
+container
+Kubernetes
+OpenShift
+CI/CD
+GitHub Actions
+
+# --- Git / tooling ---
+Git
+GitHub
+SourceTree
+pull request
+merge conflict
+rebase
+force push
+branch
+commit
+Makefile
+
+# --- Operations / support ---
+ServiceNow
+incident
+change request
+production support
+root cause analysis
+RCA
+SLA
+on-call
+hotfix
+deployment
+release
+rollback
+reconciliation
+data validation
+batch job
+job failure
+retry
+dead letter queue
+logging
+monitoring
+observability
+Splunk
+APM
+
+# --- Architecture ---
+microservices
+monolith
+system design
+scalability
+high availability
+load balancer
+caching
+Redis
+message queue
+asynchronous processing
+background worker
+webhook
+
+# --- CS fundamentals ---
+data structures
+algorithms
+LeetCode
+hash map
+two pointers
+sliding window
+linked list
+binary search
+time complexity
+Big O
+recursion
+OOP
+inheritance
+polymorphism
+encapsulation
+interface
+SOLID
+design patterns
+
+# --- AI / ML ---
+GenAI
+LLM
+RAG
+retrieval-augmented generation
+embeddings
+vector database
+Chroma
+ChromaDB
+semantic search
+chunking
+prompt engineering
+tool calling
+function calling
+agent
+agentic
+MCP
+Model Context Protocol
+fine-tuning
+LoRA
+QLoRA
+PEFT
+quantization
+Hugging Face
+transformers
+PyTorch
+inference
+tokens
+context window
+hallucination
+evaluation
+guardrails
+OpenAI
+Anthropic
+Claude
+Claude Code
+Codex
+ChatGPT
+Gemini
+OpenRouter
+Ollama
+Whisper
+DeepSeek
+Qwen
+Kimi
+GPT-OSS
+speech-to-text
+transcription
+diarization
+
+# --- Finance / business domain ---
+broker-dealer
+compliance
+supervisory
+underwriting
+Salesforce
+Dynamics 365
+
+# --- Certifications / learning ---
+Solutions Architect Associate
+Developer Associate
+AWS Certified AI Practitioner
+SAA-C03
+DVA-C02
+AIF-C01
+Udemy
+
+# --- Roles / process ---
+technology lead
+senior software engineer
+backend engineer
+cloud engineer
+SRE
+platform engineering
+stakeholder
+Agile
+Scrum
+sprint
+standup
+Jira
+
+# --- Dev environment / frontend ---
+macOS
+Terminal
+bash
+zsh
+Homebrew
+Node.js
+npm
+JavaScript
+TypeScript
+React
+HTML
+CSS
+Bootstrap
+PWA
+
+# --- Home / devices ---
+ESP32
+aiohomekit
+HomeKit
+ecobee
+Ring
+iPhone
+Apple Watch
+Google TV
+HVAC
+air handler
+thermostat
+sump pump
+drywell
+downspout
+Powerwall
+
+# --- Personal finance / apps ---
+escrow
+mortgage
+Roth IRA
+401(k)
+HOA
+WhatsApp
+Gmail
+Google Drive

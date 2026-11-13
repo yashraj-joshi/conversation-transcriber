@@ -4,7 +4,8 @@
 
 **Created**: 2026-11-11
 
-**Status**: Draft (revised 2026-11-11: desktop browsers added as a first-class target)
+**Status**: Draft (revised 2026-11-11: desktop browsers added as a first-class target; 2026-11-13:
+transcription provider amended by [002](../002-openrouter-transcription/spec.md))
 
 **Input**: User description: "Create a website with an option to open on an iPhone like an app (not an
 actual Apple app). Record a conversation using the mobile application; in the backend, using OpenAI API
@@ -13,13 +14,23 @@ month, with the files sorted by date inside each folder. Serverless on AWS, depl
 Revision: "It should also open as a regular website on a computer (Mac / Chrome browser), at the same
 URL as on the phone."
 
+## Clarifications
+
+### Session 2026-11-13
+
+- Q: Should each 10-minute audio part upload as soon as it is finished while the recording is still
+  going, or should all parts wait and upload together after Stop? → A: Upload each part in the
+  background as soon as it is finished; after Stop, upload only the last part and then start
+  transcription.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Record a conversation and get a saved transcript (Priority: P1)
 
 The owner opens the app (from their iPhone home screen or in a browser on their computer), signs in
-once, taps or clicks **Record**, has a conversation, and taps **Stop**. The recording is uploaded
-automatically, transcribed in the background, and the transcript is saved in that month's folder with a
+once, taps or clicks **Record**, has a conversation, and taps **Stop**. Long recordings are uploaded in
+parts in the background while recording continues; after Stop only the last part remains to upload. The
+recording is then transcribed in the background, and the transcript is saved in that month's folder with a
 date-and-time file name. The app shows the progress (uploading → transcribing → done) and then the
 transcript text.
 
@@ -42,6 +53,9 @@ what was said.
    `2026-11-11_14-30-05`.
 5. **Given** a conversation longer than 30 minutes, **When** it is stopped, **Then** the full
    conversation is transcribed into a single transcript file, in spoken order.
+6. **Given** a recording has been running for more than 10 minutes with a working connection, **When**
+   the owner checks storage before tapping Stop, **Then** every finished part is already uploaded, and
+   after Stop only the final part is uploaded before transcription starts.
 
 ---
 
@@ -174,10 +188,12 @@ app, and confirm the recording uploads and is transcribed.
 - **FR-003**: Users MUST be able to start, pause, resume, and stop an audio recording from the device's
   microphone, with a visible elapsed-time indicator.
 - **FR-004**: The system MUST support recordings of at least 2 hours.
-- **FR-005**: On stop, the system MUST upload the recording automatically and start transcription
-  without further user action.
-- **FR-006**: The system MUST transcribe recordings with OpenAI's speech-to-text service using the
-  owner's OpenAI platform credits.
+- **FR-005**: While recording, the system MUST upload each finished audio part in the background as
+  soon as it is closed, without interrupting the recording. On stop, it MUST upload the final part
+  and then start transcription automatically, without further user action. Transcription starts only
+  after all parts are uploaded.
+- **FR-006**: *Superseded by [002 FR-001](../002-openrouter-transcription/spec.md)*: recordings are
+  transcribed through OpenRouter with a configurable model (initially MAI-Transcribe 2).
 - **FR-007**: The system MUST save each transcript as a plain-text file in cloud storage, inside a
   folder per month (`YYYY-MM`), with a file name beginning `YYYY-MM-DD_HH-MM-SS` (recording start, local
   time of the recording device) so files sort chronologically.
@@ -187,7 +203,9 @@ app, and confirm the recording uploads and is transcribed.
 - **FR-010**: Users MUST be able to list months, list the transcripts in a month sorted by date (newest
   first), and read, copy, and share a transcript. Where the browser has no share sheet, Download (as a
   `.txt` file) MUST be offered instead of Share.
-- **FR-011**: Audio captured but not yet uploaded MUST be kept on the device and uploaded later.
+- **FR-011**: Audio captured but not yet uploaded (including parts whose background upload failed
+  during recording) MUST be kept on the device and uploaded later; a part is removed from the device
+  only after its upload succeeds.
 - **FR-012**: Users MUST be able to retry a failed transcription.
 - **FR-013**: Raw audio MUST be deleted automatically after a configurable retention period (default 30
   days); transcripts MUST be kept until deleted by the owner.
@@ -239,8 +257,8 @@ app, and confirm the recording uploads and is transcribed.
 - On iPhone, the app must stay in the foreground with the screen on while recording; iOS web apps cannot
   record reliably in the background. This is a platform limitation and is communicated in the app. On a
   computer, the browser tab must stay open and the computer awake.
-- Speaker labels (who said what) are out of scope for v1; the current recommended OpenAI model does not
-  provide them.
+- Speaker labels (who said what) were out of scope for v1. 002 adds them, numbered per 5-minute section
+  (002 User Story 5).
 - Transcript language is auto-detected.
 - Time zone for folder/file naming is the recording device's local time zone at recording start.
-- The owner provides an AWS account and an OpenAI API key with available credits.
+- The owner provides an AWS account and an OpenRouter API key with available credits (002).

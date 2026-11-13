@@ -4,11 +4,15 @@
 s3://<project>-data-<account-id>/
 ├── audio/                                   # transient, expires after audio_retention_days (default 30)
 │   └── <recordingId>/
-│       ├── part-000.mp4
-│       ├── part-001.mp4
+│       ├── part-000.wav
+│       ├── part-001.wav
 │       └── manifest.json                    # written last; its creation triggers transcription
 ├── status/                                  # transient, expires after 90 days
 │   └── <recordingId>.json
+├── work/                                    # per-part results (002); expires with audio/
+│   └── <recordingId>/part-NNN.json
+├── config/
+│   └── vocabulary.txt                       # custom vocabulary (002), uploaded by Terraform
 └── transcripts/                             # retained (bucket versioning on)
     ├── 2026-10/
     │   ├── 2026-10-02_09-15-00_a1b2c3d4.txt
@@ -25,5 +29,6 @@ Rules:
 2. File: `YYYY-MM-DD_HH-MM-SS_<first 8 hex chars of recordingId>.txt`.
 3. S3 lists keys in UTF-8 binary order, so the S3 console and `aws s3 ls` show files oldest → newest.
    The API returns them newest first.
-4. Only the transcriber Lambda writes to `transcripts/` and `status/`. Only presigned POSTs (from the API)
+4. Only the transcriber Lambda writes to `transcripts/`, `status/`, and `work/`. Only Terraform (or
+   `scripts/push-vocabulary.sh`) writes `config/`. Only presigned POSTs (from the API)
    and the API's manifest write touch `audio/`.

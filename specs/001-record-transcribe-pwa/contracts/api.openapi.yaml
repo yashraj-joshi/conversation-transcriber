@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Conversation Transcriber API
-  version: 1.0.0
+  version: 1.1.0
   description: >
     HTTP API (API Gateway v2). Every route requires `Authorization: Bearer <Cognito ID token>`.
     Errors use `{ "error": "<message>" }` with 400/401/404/409/500.
@@ -25,6 +25,9 @@ components:
         state: { type: string, enum: [pending, transcribing, done, failed] }
         transcriptKey: { type: string, nullable: true }
         error: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        cost: { type: number, nullable: true }
+        vocabulary: { type: string, nullable: true }
         updatedAt: { type: string, format: date-time }
     TranscriptItem:
       type: object
@@ -46,8 +49,8 @@ paths:
               required: [recordingId, index, contentType]
               properties:
                 recordingId: { type: string, format: uuid }
-                index: { type: integer, minimum: 0, maximum: 29 }
-                contentType: { type: string, example: audio/mp4 }
+                index: { type: integer, minimum: 0, maximum: 35 }
+                contentType: { type: string, enum: [audio/wav, audio/mpeg, audio/flac], example: audio/wav }
       responses:
         "200":
           description: Presigned POST (send as multipart/form-data with `fields` then `file`)
@@ -58,7 +61,8 @@ paths:
                 properties:
                   url: { type: string }
                   fields: { type: object, additionalProperties: { type: string } }
-                  key: { type: string, example: audio/3f2c.../part-000.mp4 }
+                  key: { type: string, example: audio/3f2c.../part-000.wav }
+                  maxBytes: { type: integer, example: 18874368 }
         "400": { description: Invalid input }
   /recordings/{id}/complete:
     post:
@@ -75,8 +79,8 @@ paths:
               properties:
                 startedAt: { type: string, format: date-time }
                 tzOffsetMinutes: { type: integer, minimum: -840, maximum: 840 }
-                durationSeconds: { type: number, minimum: 1, maximum: 18000 }
-                partCount: { type: integer, minimum: 1, maximum: 30 }
+                durationSeconds: { type: number, minimum: 1, maximum: 10800 }
+                partCount: { type: integer, minimum: 1, maximum: 36 }
                 title: { type: string, maxLength: 120 }
       responses:
         "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }

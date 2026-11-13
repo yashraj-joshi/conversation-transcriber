@@ -1,5 +1,10 @@
 # Phase 0 Research: Record & Transcribe Conversations
 
+> **Amended 2026-11-13 by [002](../002-openrouter-transcription/plan.md):** R1 (model), R2 (10-min parts + prompt chaining), R3 (MediaRecorder mp4/webm) and R8 (OpenAI key) are
+> superseded: the transcriber calls OpenRouter with the model read from SSM, and the browser records
+> 16 kHz mono WAV in 5-minute parts. R4–R7 and R9–R11 still apply.
+
+
 ## R1. Transcription model
 
 - **Decision**: Default `gpt-transcribe`, configurable via Terraform variable `openai_model`.

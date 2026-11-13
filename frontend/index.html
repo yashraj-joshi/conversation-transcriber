@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Conversation Transcriber</title>
+  <meta name="description" content="Record conversations and get transcripts saved by month.">
+  <meta name="theme-color" content="#1f3a5f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Transcriber">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">Transcriber</span>
+    <nav class="tabs" id="tabs" hidden>
+      <button type="button" class="tab" data-view="record" aria-current="page">Record</button>
+      <button type="button" class="tab" data-view="transcripts">Transcripts</button>
+    </nav>
+    <button type="button" class="link" id="signout" hidden>Sign out</button>
+  </header>
+
+  <div class="banner" id="install-hint" hidden>
+    <span>Install: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</span>
+    <button type="button" class="link" id="install-dismiss">Dismiss</button>
+  </div>
+  <div class="banner notice" id="notice" role="status" aria-live="polite" hidden>
+    <span id="notice-text"></span>
+    <button type="button" class="link" id="notice-dismiss">Dismiss</button>
+  </div>
+
+  <main>
+    <section id="view-signin" class="view card narrow" hidden>
+      <h1>Sign in</h1>
+      <form id="signin-form" autocomplete="on">
+        <label>Email<input type="email" id="signin-email" autocomplete="username" required></label>
+        <label>Password<input type="password" id="signin-password" autocomplete="current-password" required></label>
+        <p class="error" id="signin-error" role="alert" hidden></p>
+        <button type="submit" class="btn primary" id="signin-submit">Sign in</button>
+      </form>
+    </section>
+
+    <section id="view-record" class="view" hidden>
+      <div class="card recorder">
+        <div class="timer" id="timer" aria-live="off">00:00:00</div>
+        <div class="rec-state" id="rec-state">Ready</div>
+        <label class="title-field">Title (optional)
+          <input type="text" id="title" maxlength="120" placeholder="e.g. Weekly sync">
+        </label>
+        <div class="controls">
+          <button type="button" class="btn primary big" id="btn-record">Record</button>
+          <button type="button" class="btn" id="btn-pause" hidden>Pause</button>
+          <button type="button" class="btn danger" id="btn-stop" hidden>Stop</button>
+        </div>
+        <p class="hint" id="record-hint">Keep this app open and the screen on while recording. Press Space to start or stop.</p>
+      </div>
+      <h2 class="section-title">On this device</h2>
+      <p class="empty" id="device-empty">No recordings yet.</p>
+      <ul class="device-list" id="device-list"></ul>
+    </section>
+
+    <section id="view-transcripts" class="view" hidden>
+      <div class="tx-layout" id="tx-layout">
+        <div class="tx-list-pane card">
+          <div class="months" id="months" role="tablist" aria-label="Months"></div>
+          <p class="empty" id="tx-empty" hidden>No transcripts yet.</p>
+          <ul class="tx-items" id="tx-items"></ul>
+        </div>
+        <article class="tx-viewer card" id="tx-viewer">
+          <div class="viewer-actions">
+            <button type="button" class="btn back" id="tx-back">&larr; Back</button>
+            <button type="button" class="btn" id="tx-copy" disabled>Copy</button>
+            <button type="button" class="btn" id="tx-share" hidden disabled>Share</button>
+            <button type="button" class="btn" id="tx-download" hidden disabled>Download</button>
+          </div>
+          <h2 class="tx-title" id="tx-title">Select a transcript</h2>
+          <pre class="tx-text" id="tx-text"></pre>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
