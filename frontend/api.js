@@ -34,6 +34,7 @@ export const completeRecording = (rec) =>
     durationSeconds: rec.durationSeconds,
     partCount: rec.partCount,
     ...(rec.title ? { title: rec.title } : {}),
+    ...(rec.sourceName ? { sourceName: rec.sourceName } : {}),
   });
 
 export const getStatus = (id) => call('GET', `/recordings/${id}`).then((r) => r.data);

@@ -1,0 +1,71 @@
+<!doctype html>
+<!-- Browser test for importer.js (spec 003). Run: see README "Run the tests".
+     Serves from the repo root; result is written to <pre id="result"> as JSON. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>importer test</title></head>
+<body>
+<pre id="result">running</pre>
+<script type="module">
+import * as importer from '../importer.js';
+import * as store from '../store.js';
+
+function wavFile(seconds, rate, channels, name) {
+  const frames = seconds * rate;
+  const buf = new ArrayBuffer(44 + frames * channels * 2);
+  const v = new DataView(buf);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + frames * channels * 2, true); w(8, 'WAVEfmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, channels, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * channels * 2, true);
+  v.setUint16(32, channels * 2, true); v.setUint16(34, 16, true); w(36, 'data');
+  v.setUint32(40, frames * channels * 2, true);
+  const pcm = new Int16Array(buf, 44);
+  for (let i = 0; i < frames; i++) {
+    const s = Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 8000);
+    for (let c = 0; c < channels; c++) pcm[i * channels + c] = s;
+  }
+  return new File([buf], name, { type: 'audio/wav', lastModified: Date.UTC(2026, 9, 2, 9, 20, 30) });
+}
+
+const out = {};
+try {
+  const file = wavFile(330, 44100, 2, 'Team_sync.wav');
+  const { buffer, durationSeconds } = await importer.decodeFile(file);
+  out.decodedRate = buffer.sampleRate;
+  out.duration = Math.round(durationSeconds);
+  out.title = importer.titleFromName(file.name);
+  const start = importer.defaultStart(file, durationSeconds);
+  out.defaultStartUtc = start.toISOString();
+  const progress = [];
+  const id = await importer.prepare(buffer, { title: out.title, startedAt: start, sourceName: file.name },
+    (d, t) => progress.push(`${d}/${t}`));
+  out.progress = progress;
+  const rec = await store.getRecording(id);
+  out.rec = { state: rec.state, partCount: rec.partCount, durationSeconds: rec.durationSeconds, sourceName: rec.sourceName };
+  const parts = await store.listParts(id);
+  out.parts = parts.map((p) => {
+    const v = new DataView(p.data);
+    return { index: p.index, bytes: p.data.byteLength, rate: v.getUint32(24, true), channels: v.getUint16(22, true), seconds: Math.round(p.samples / 16000) };
+  });
+  await store.deleteRecording(id);
+
+  try {
+    await importer.decodeFile(new File([new Uint8Array([1, 2, 3, 4, 5])], 'junk.mp3'));
+    out.junk = 'accepted (unexpected)';
+  } catch (e) { out.junk = `${e.constructor.name}: ${e.message}`; }
+
+  try {
+    await importer.decodeFile(wavFile(0.5, 16000, 1, 'short.wav'));
+    out.short = 'accepted (unexpected)';
+  } catch (e) { out.short = e.message; }
+
+  out.removedImports = await store.discardInterruptedImports();
+  out.ok = true;
+} catch (e) {
+  out.ok = false;
+  out.error = `${e.name}: ${e.message}`;
+}
+document.getElementById('result').textContent = JSON.stringify(out);
+</script>
+</body>
+</html>

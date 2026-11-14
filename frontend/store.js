@@ -128,6 +128,25 @@ export async function assemblePart(recordingId, partIndex) {
   return samples;
 }
 
+/** Store a finished WAV part directly (file uploads, spec 003). */
+export async function putPart(recordingId, index, data, samples) {
+  const { tx, os } = await store('parts', 'readwrite');
+  os.put({ recordingId, index, data, contentType: 'audio/wav', samples });
+  await done(tx);
+}
+
+/** Delete file imports that were interrupted while being prepared (spec 003). */
+export async function discardInterruptedImports() {
+  let removed = 0;
+  for (const rec of await listRecordings()) {
+    if (rec.state === 'importing') {
+      await deleteRecording(rec.id);
+      removed++;
+    }
+  }
+  return removed;
+}
+
 export async function listParts(recordingId) {
   const { os } = await store('parts');
   return req(os.getAll(partRange(recordingId)));

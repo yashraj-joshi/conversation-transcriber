@@ -1,6 +1,7 @@
 # Conversation Transcriber
 
-Record a conversation on your iPhone (installed to the home screen) or in a desktop browser. Each recording
+Record a conversation on your iPhone (installed to the home screen) or in a desktop browser, or upload an
+existing audio file. Each recording
 is transcribed through [OpenRouter](https://openrouter.ai) by a speech-to-text model you choose (default
 **MAI-Transcribe 2**, `microsoft/mai-transcribe-2`). The model is helped by a custom vocabulary of your own
 terms (and can optionally label who is speaking), and the transcript is saved to S3 as a text file in a folder per month:
@@ -10,7 +11,8 @@ transcripts/2026-11/2026-11-11_14-30-05_3f2c9a1b.txt
 ```
 
 Everything runs serverless on AWS and is deployed with Terraform. Specs: [001 record & transcribe](specs/001-record-transcribe-pwa/spec.md),
-[002 OpenRouter, model & vocabulary](specs/002-openrouter-transcription/spec.md).
+[002 OpenRouter, model & vocabulary](specs/002-openrouter-transcription/spec.md),
+[003 upload a file](specs/003-upload-audio-file/spec.md).
 
 ## How it works
 
@@ -45,8 +47,8 @@ recorders produce mp4/webm. OpenRouter takes audio as base64 JSON with a 25 MB p
 backend/src/        core.py (pure logic) · openrouter_client.py · api.py · transcriber.py
 backend/tests/      unittest suites with in-memory S3/SSM/HTTP fakes (offline, no AWS SDK needed)
 config/             vocabulary.txt — the custom vocabulary (one term per line)
-frontend/           static PWA: index.html, app.js, recorder.js, pcm-worklet.js, wav.js, store.js, auth.js, api.js, sw.js
-frontend/tests/     node --test suite for the WAV encoder / resampler
+frontend/           static PWA: index.html, app.js, recorder.js, importer.js, pcm-worklet.js, wav.js, store.js, auth.js, api.js, sw.js
+frontend/tests/     node --test suite (WAV/resampler) + headless-Chrome test (app page, file import)
 infra/              Terraform (S3, CloudFront, Cognito, API Gateway, Lambda, SSM)
 scripts/            set-openrouter-key.sh · set-model.sh · push-vocabulary.sh · create-user.sh · make_icons.py
 specs/              Spec Kit specs, plans, tasks
@@ -67,6 +69,7 @@ specs/              Spec Kit specs, plans, tasks
 ```bash
 python3 -m unittest discover -s backend/tests -t backend/tests
 node --test frontend/tests/wav.test.mjs
+node frontend/tests/run-browser-test.mjs      # headless Chrome: app page loads + file-upload conversion
 terraform -chdir=infra fmt -check -recursive
 terraform -chdir=infra init -backend=false && terraform -chdir=infra validate
 ```
@@ -95,7 +98,19 @@ keeps the screen awake and saves what was captured if it is interrupted.
 
 On a Mac or PC, use the same URL in Chrome, Edge or Safari. Chrome and Edge also offer **Install app**.
 
-## 3. Change the transcription model
+## 3. Upload an existing audio file
+
+On the Record screen, tap **Upload an audio file** and pick an MP3, M4A (iPhone Voice Memos), WAV, FLAC,
+or another format the browser can play; video files use their audio track. Check the title and the
+**Recorded at** date. They default to the file name, and to the file's modified time minus its length,
+and they decide the month folder and file name. Then tap **Transcribe**.
+
+The browser converts the file to the same 5-minute 16 kHz WAV parts as a recording, so uploads, Retry,
+limits (3 hours, 500 MB), and costs are identical. The transcript header shows `Source file: <name>`.
+On iPhone, files up to about an hour work reliably. Use a computer for longer files, because decoding
+happens in memory. Converted WAV is about 115 MB per hour to upload, often more than the original file.
+
+## 4. Change the transcription model
 
 The model id is the SSM String parameter `/<project>/transcription-model`. A change applies to the **next
 recording**, with no redeploy, and `terraform apply` will not overwrite it.
@@ -109,7 +124,7 @@ Pick a model that accepts WAV audio (most speech-to-text models do). If a model 
 the recording shows Failed with the provider's message, and Retry works after you switch back. Each
 transcript's header records the model that produced it.
 
-## 4. Edit the custom vocabulary
+## 5. Edit the custom vocabulary
 
 `config/vocabulary.txt` holds one term per line. Blank lines and lines starting with `#` are ignored,
 duplicates are removed, and terms longer than 100 characters are skipped. Up to 1000 terms are sent with
@@ -126,7 +141,7 @@ without it. The transcript header then says `Vocabulary: not applied (rejected b
 recommends at most ~200 phrases for its phrase lists. If you see that message, shorten the list to your
 most important terms.
 
-## 5. Speaker labels
+## 6. Speaker labels
 
 Off by default. To turn them on, set `speaker_labels = true` in `infra/terraform.tfvars` and run
 `terraform -chdir=infra apply`. Transcripts then look like this:
@@ -143,7 +158,7 @@ The model labels each 5-minute part on its own, so numbers can change between se
 keep the timeline continuous. If a model doesn't support speaker labels, the part is transcribed as plain
 text.
 
-## 6. Local frontend development
+## 7. Local frontend development
 
 ```bash
 # 1. allow the local origin, then apply:   extra_allowed_origins = ["http://localhost:8000"]  in terraform.tfvars

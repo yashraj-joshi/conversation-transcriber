@@ -79,6 +79,18 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(req["partCount"], 1)
         self.assertEqual(req["startedAt"], "2026-11-11T22:30:05.120Z")
 
+    def test_source_name(self):
+        self.assertIsNone(self._complete()["sourceName"])
+        self.assertEqual(self._complete(sourceName="C:\\Users\\me\\Voice  Memo\x07.m4a")["sourceName"], "Voice Memo.m4a")
+        self.assertEqual(self._complete(sourceName="/tmp/a/b/call.mp3")["sourceName"], "call.mp3")
+        for bad in [5, "x" * 201]:
+            with self.assertRaises(core.ValidationError):
+                self._complete(sourceName=bad)
+        parts, _ = core.match_parts([f"audio/{RID}/part-000.wav"], 1)
+        meta = core.validate_manifest(core.build_manifest(RID, self._complete(sourceName="call.mp3"), parts, "s", NOW))
+        text = core.render_transcript(meta, ["hi"], "m", "none")
+        self.assertIn("\nSource file: call.mp3\n", "\n" + text)
+
     def test_complete_request_rejects(self):
         for over in [{"startedAt": "2026-11-12T23:00:00Z"}, {"startedAt": "2026-11-11T22:30:05"},
                      {"tzOffsetMinutes": 900}, {"durationSeconds": 0}, {"durationSeconds": 10801},
@@ -133,8 +145,30 @@ class RequestTests(unittest.TestCase):
             "input_audio": {"data": "QUJD", "format": "wav"},
             "response_format": "json",
             "keyterms": ["FastAPI"],
-            "provider": {"data_collection": "deny"},
+            "provider": {"data_collection": "deny",
+                         "options": {"azure": {"phraseList": {"phrases": ["FastAPI"]}}}},
         })
+        only_native = core.build_transcription_request("m", "QUJD", "wav", ["FastAPI"], "", keyterms_field=False)
+        self.assertNotIn("keyterms", only_native)
+        self.assertEqual(only_native["provider"], {"options": {"azure": {"phraseList": {"phrases": ["FastAPI"]}}}})
+
+    def test_drop_helpers_keep_other_features(self):
+        p = core.build_transcription_request("m", "QUJD", "wav", ["T"], "deny", diarize=True)
+        no_kt = core.drop_keyterms_field(p)
+        self.assertNotIn("keyterms", no_kt)
+        self.assertEqual(no_kt["provider"]["options"]["azure"],
+                         {"phraseList": {"phrases": ["T"]}, "diarization": {"enabled": True}})
+        no_vocab = core.drop_vocabulary(p)
+        self.assertEqual(no_vocab["provider"]["options"]["azure"], {"diarization": {"enabled": True}})
+        self.assertTrue(no_vocab["diarize"])
+        no_dia = core.drop_diarization(p)
+        self.assertEqual(no_dia["provider"]["options"]["azure"], {"phraseList": {"phrases": ["T"]}})
+        self.assertEqual(no_dia["response_format"], "json")
+        bare = core.drop_diarization(core.drop_vocabulary(p))
+        self.assertEqual(bare["provider"], {"data_collection": "deny"})
+        self.assertIn("keyterms", p)  # originals untouched
+        self.assertTrue(core.rejects_keyterms_field("The selected model does not support keyterms."))
+        self.assertFalse(core.rejects_keyterms_field("phraseList too long"))
 
     def test_build_request_without_optional(self):
         p = core.build_transcription_request("m", "QUJD", "wav", [], "")
@@ -217,6 +251,7 @@ class RenderTests(unittest.TestCase):
     def test_vocabulary_status(self):
         self.assertEqual(core.vocabulary_status(0, [True]), "none")
         self.assertEqual(core.vocabulary_status(5, [True, True]), "5 terms")
+        self.assertEqual(core.vocabulary_status(5, [True], True), "5 terms (as Azure phrase list)")
         self.assertEqual(core.vocabulary_status(5, [False]), "not applied (rejected by provider)")
         self.assertIn("1 of 2 parts", core.vocabulary_status(5, [True, False]))
 

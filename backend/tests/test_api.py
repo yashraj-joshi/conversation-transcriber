@@ -61,6 +61,7 @@ class CompleteTests(unittest.TestCase):
         self.assertEqual([p["key"] for p in manifest["parts"]],
                          [core.part_key(RID, 0, "wav"), core.part_key(RID, 1, "wav")])
         self.assertEqual(manifest["submittedBy"], "user-1")
+        self.assertIsNone(manifest["sourceName"])
         core.validate_manifest(manifest)
 
     def test_done_returns_200_without_rewrite(self):

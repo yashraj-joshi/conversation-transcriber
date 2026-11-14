@@ -5,6 +5,7 @@ Nothing in this module talks to AWS or the network, so it is unit-tested offline
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +16,7 @@ MAX_PARTS = 36                           # 3 hours
 MAX_DURATION_SECONDS = 10800             # 3 hours
 MAX_PART_BYTES = 18 * 1024 * 1024        # 18 MB raw -> 24 MB base64 (< 25 MB OpenRouter inline cap)
 MAX_TITLE_LENGTH = 120
+MAX_SOURCE_NAME_LENGTH = 200
 MAX_FUTURE_SKEW = timedelta(minutes=10)
 
 MAX_KEYTERMS = 1000                      # OpenRouter `keyterms` limits
@@ -178,12 +180,22 @@ def validate_complete_request(body, now: datetime) -> dict:
         if len(title) > MAX_TITLE_LENGTH:
             raise ValidationError(f"title must be at most {MAX_TITLE_LENGTH} characters")
         title = title or None
+    source = body.get("sourceName")
+    if source is not None:
+        if not isinstance(source, str):
+            raise ValidationError("sourceName must be a string")
+        source = source.replace("\\", "/").rsplit("/", 1)[-1]          # base name only
+        source = " ".join("".join(c for c in source if c.isprintable()).split())
+        if len(source) > MAX_SOURCE_NAME_LENGTH:
+            raise ValidationError(f"sourceName must be at most {MAX_SOURCE_NAME_LENGTH} characters")
+        source = source or None
     return {
         "startedAt": started.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "tzOffsetMinutes": tz,
         "durationSeconds": float(duration),
         "partCount": part_count,
         "title": title,
+        "sourceName": source,
     }
 
 
@@ -212,6 +224,7 @@ def build_manifest(recording_id: str, req: dict, parts: list, submitted_by: str,
         "partCount": req["partCount"],
         "parts": parts,
         "title": req["title"],
+        "sourceName": req.get("sourceName"),
         "submittedBy": submitted_by,
         "submittedAt": iso_now(now),
     }
@@ -240,6 +253,7 @@ def validate_manifest(manifest) -> dict:
         "tzOffsetMinutes": tz,
         "durationSeconds": float(manifest.get("durationSeconds") or 0),
         "title": manifest.get("title"),
+        "sourceName": manifest.get("sourceName"),
         "parts": ordered,
     }
 
@@ -271,7 +285,10 @@ def parse_vocabulary(text: str):
 # --- OpenRouter request / response (plan R1, R7) ---------------------------------------------------
 
 def build_transcription_request(model: str, audio_b64: str, audio_format: str, keyterms, data_collection,
-                                diarize: bool = False):
+                                diarize: bool = False, keyterms_field: bool = True):
+    """OpenRouter STT request. The vocabulary goes out twice: as OpenRouter's generic `keyterms` (unless
+    the model is known to reject that field) and as Azure's native `phraseList`. Provider options are only
+    forwarded to the provider that serves the request, so the second form is harmless elsewhere."""
     if not model or not isinstance(model, str):
         raise ValidationError("transcription model is not configured")
     payload = {
@@ -279,34 +296,62 @@ def build_transcription_request(model: str, audio_b64: str, audio_format: str, k
         "input_audio": {"data": audio_b64, "format": audio_format},
         "response_format": "json",
     }
-    if keyterms:
-        payload["keyterms"] = list(keyterms)
     provider = {}
     if data_collection in ("deny", "allow"):
         provider["data_collection"] = data_collection
+    azure = {}
+    if keyterms:
+        if keyterms_field:
+            payload["keyterms"] = list(keyterms)
+        azure["phraseList"] = {"phrases": list(keyterms)}
     if diarize:
-        # OpenRouter's top-level flag, plus Azure's native option (OpenRouter's documented MAI example);
-        # only the options for the provider that serves the request are forwarded.
         payload["diarize"] = True
         payload["response_format"] = "verbose_json"
         payload["timestamp_granularities"] = ["segment"]
-        provider["options"] = {"azure": {"diarization": {"enabled": True}}}
+        azure["diarization"] = {"enabled": True}
+    if azure:
+        provider["options"] = {"azure": azure}
     if provider:
         payload["provider"] = provider
     return payload
 
 
+def _without(payload: dict, top_keys=(), azure_keys=()) -> dict:
+    p = json.loads(json.dumps(payload))
+    for k in top_keys:
+        p.pop(k, None)
+    azure = p.get("provider", {}).get("options", {}).get("azure", {})
+    for k in azure_keys:
+        azure.pop(k, None)
+    provider = p.get("provider")
+    if provider is not None:
+        if not provider.get("options", {}).get("azure"):
+            provider.get("options", {}).pop("azure", None)
+        if not provider.get("options"):
+            provider.pop("options", None)
+        if not provider:
+            p.pop("provider")
+    return p
+
+
+def drop_keyterms_field(payload: dict) -> dict:
+    """Keep the vocabulary only in the provider-native form (model rejected OpenRouter `keyterms`)."""
+    return _without(payload, top_keys=("keyterms",))
+
+
+def drop_vocabulary(payload: dict) -> dict:
+    return _without(payload, top_keys=("keyterms",), azure_keys=("phraseList",))
+
+
 def drop_diarization(payload: dict) -> dict:
     """The same request without speaker labels (fallback when the provider rejects them)."""
-    p = {k: v for k, v in payload.items() if k not in ("diarize", "timestamp_granularities")}
+    p = _without(payload, top_keys=("diarize", "timestamp_granularities"), azure_keys=("diarization",))
     p["response_format"] = "json"
-    provider = dict(p.get("provider") or {})
-    provider.pop("options", None)
-    if provider:
-        p["provider"] = provider
-    else:
-        p.pop("provider", None)
     return p
+
+
+def rejects_keyterms_field(message: str) -> bool:
+    return "keyterms" in (message or "").lower()
 
 
 # --- Speaker labels (spec 002 FR-015) --------------------------------------------------------------
@@ -410,12 +455,12 @@ def error_message(status, provider_message: str, model: str) -> str:
 
 # --- Transcript rendering --------------------------------------------------------------------------
 
-def vocabulary_status(term_count: int, applied_flags) -> str:
+def vocabulary_status(term_count: int, applied_flags, via_phrase_list: bool = False) -> str:
     flags = list(applied_flags)
     if term_count == 0:
         return "none"
     if all(flags):
-        return f"{term_count} terms"
+        return f"{term_count} terms" + (" (as Azure phrase list)" if via_phrase_list else "")
     if not any(flags):
         return "not applied (rejected by provider)"
     return f"{term_count} terms (not applied to {flags.count(False)} of {len(flags)} parts: rejected by provider)"
@@ -426,6 +471,8 @@ def render_transcript(meta: dict, texts, model: str, vocab_status: str, cost=Non
     lines = []
     if meta.get("title"):
         lines.append(f"Title: {meta['title']}")
+    if meta.get("sourceName"):
+        lines.append(f"Source file: {meta['sourceName']}")
     lines += [
         f"Recorded: {local:%Y-%m-%d %H:%M:%S} ({format_offset(meta['tzOffsetMinutes'])})",
         f"Duration: {format_duration(meta['durationSeconds'])}",

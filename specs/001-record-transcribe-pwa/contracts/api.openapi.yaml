@@ -82,6 +82,7 @@ paths:
                 durationSeconds: { type: number, minimum: 1, maximum: 10800 }
                 partCount: { type: integer, minimum: 1, maximum: 36 }
                 title: { type: string, maxLength: 120 }
+                sourceName: { type: string, maxLength: 200, description: "Original file name for uploaded files (spec 003)" }
       responses:
         "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
         "200": { description: Already transcribed, content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }

@@ -73,3 +73,33 @@ export function encodeWav(chunks, sampleRate = TARGET_RATE) {
   new Int16Array(buffer, 44).set(pcm);
   return buffer;
 }
+
+/** Average channels [start, end) into one mono Float32Array. */
+export function mixToMono(channels, start = 0, end = channels[0].length) {
+  const out = new Float32Array(Math.max(0, end - start));
+  if (channels.length === 1) {
+    out.set(channels[0].subarray(start, end));
+    return out;
+  }
+  for (const ch of channels) {
+    for (let i = start; i < end; i++) out[i - start] += ch[i];
+  }
+  const n = channels.length;
+  for (let i = 0; i < out.length; i++) out[i] /= n;
+  return out;
+}
+
+/** Float32 samples -> Int16Array (no resampling). */
+export function floatToInt16(input) {
+  const out = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++) out[i] = toInt16(input[i]);
+  return out;
+}
+
+/** Split [0, total) into consecutive [start, end) ranges of at most perPart samples. */
+export function partRanges(total, perPart) {
+  if (!(perPart > 0)) throw new Error('perPart must be > 0');
+  const ranges = [];
+  for (let s = 0; s < total; s += perPart) ranges.push([s, Math.min(total, s + perPart)]);
+  return ranges;
+}

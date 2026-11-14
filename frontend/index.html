@@ -60,6 +60,29 @@
           <button type="button" class="btn danger" id="btn-stop" hidden>Stop</button>
         </div>
         <p class="hint" id="record-hint">Keep this app open and the screen on while recording. Press Space to start or stop.</p>
+        <div class="upload-row">
+          <span class="hint">or</span>
+          <button type="button" class="btn" id="btn-upload">Upload an audio file</button>
+          <input type="file" id="file-input" hidden
+                 accept="audio/*,video/mp4,video/quicktime,.m4a,.mp3,.wav,.flac,.ogg,.oga,.opus,.webm,.aac,.caf,.mp4,.mov">
+        </div>
+      </div>
+
+      <div class="card import-panel" id="import-panel" hidden>
+        <h2 class="section-title">Transcribe a file</h2>
+        <p class="device-title" id="import-file"></p>
+        <p class="hint" id="import-status" aria-live="polite"></p>
+        <p class="error" id="import-error" role="alert" hidden></p>
+        <div id="import-form" hidden>
+          <label>Title<input type="text" id="import-title" maxlength="120"></label>
+          <label>Recorded at (sets the month folder and file name)
+            <input type="datetime-local" id="import-when" step="1" required>
+          </label>
+        </div>
+        <div class="controls">
+          <button type="button" class="btn primary" id="import-go" hidden>Transcribe</button>
+          <button type="button" class="btn" id="import-cancel">Cancel</button>
+        </div>
       </div>
       <h2 class="section-title">On this device</h2>
       <p class="empty" id="device-empty">No recordings yet.</p>

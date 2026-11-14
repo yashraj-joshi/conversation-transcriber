@@ -34,3 +34,4 @@ __pycache__/
 # Generated
 frontend/config.js
 infra/build/
+infra/tfplan

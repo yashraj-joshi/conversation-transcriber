@@ -3,6 +3,7 @@ import * as auth from './auth.js';
 import * as api from './api.js';
 import * as store from './store.js';
 import { Recorder, recoverInterrupted, isSupported } from './recorder.js';
+import * as importer from './importer.js';
 
 const $ = (id) => document.getElementById(id);
 const recorder = new Recorder();
@@ -86,6 +87,8 @@ let tick = null;
 function renderRecorder() {
   const s = recorder.state;
   $('btn-record').hidden = s !== 'idle';
+  $('btn-record').disabled = importing;
+  $('btn-upload').disabled = s !== 'idle' || importing || !$('import-panel').hidden;
   $('btn-pause').hidden = s === 'idle' || s === 'stopping';
   $('btn-stop').hidden = s === 'idle';
   $('btn-stop').disabled = s === 'stopping';
@@ -97,6 +100,7 @@ function renderRecorder() {
 }
 
 async function startRecording() {
+  if (importing || !$('import-panel').hidden) return notify('Finish or cancel the file upload first.');
   if (!isSupported()) {
     notify('This browser cannot record audio. Use Safari on iPhone, or Chrome, Edge, or Safari on a computer.', { sticky: true });
     return;
@@ -139,6 +143,7 @@ recorder.addEventListener('stopped', (e) => {
 // --- device list ---------------------------------------------------------------------------------
 
 const STATE_LABEL = {
+  importing: 'Preparing',
   recording: 'Recording',
   uploading: 'Uploading',
   submitted: 'Transcribing',
@@ -176,7 +181,7 @@ async function renderDeviceList() {
       el('div', { class: 'device-main' },
         el('span', { class: 'device-title' }, rec.title || fmtWhen(rec.startedAt)),
         el('span', { class: 'device-meta' },
-          `${rec.title ? `${fmtWhen(rec.startedAt)} · ` : ''}${rec.durationSeconds ? fmtClock(rec.durationSeconds) : ''}`),
+          `${rec.sourceName ? 'File · ' : ''}${rec.title ? `${fmtWhen(rec.startedAt)} · ` : ''}${rec.durationSeconds ? fmtClock(rec.durationSeconds) : ''}`),
         rec.error ? el('span', { class: 'device-error' }, rec.error) : null),
       el('span', { class: `chip ${rec.state}` }, label),
       el('div', { class: 'device-actions' }, actions)));
@@ -421,6 +426,98 @@ function downloadTranscript() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// --- file upload (spec 003) ---------------------------------------------------------------------
+
+let importing = false;
+let pendingImport = null; // { file, buffer, durationSeconds }
+
+function toLocalInput(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function resetImport() {
+  pendingImport = null;
+  importing = false;
+  $('import-panel').hidden = true;
+  $('import-form').hidden = true;
+  $('import-go').hidden = true;
+  $('import-go').disabled = false;
+  $('import-cancel').disabled = false;
+  $('import-error').hidden = true;
+  $('file-input').value = '';
+  renderRecorder();
+}
+
+function importError(message) {
+  $('import-error').textContent = message;
+  $('import-error').hidden = false;
+  $('import-status').textContent = '';
+  $('import-form').hidden = true;
+  $('import-go').hidden = true;
+}
+
+async function onFileChosen() {
+  const file = $('file-input').files[0];
+  if (!file) return;
+  pendingImport = null;
+  $('import-panel').hidden = false;
+  $('import-file').textContent = file.name;
+  $('import-error').hidden = true;
+  $('import-form').hidden = true;
+  $('import-go').hidden = true;
+  $('import-status').textContent = `Reading ${(file.size / 1048576).toFixed(1)} MB…`;
+  renderRecorder();
+  try {
+    const decoded = await importer.decodeFile(file);
+    if ($('import-panel').hidden) return; // cancelled meanwhile
+    pendingImport = { file, ...decoded };
+    $('import-status').textContent = `Length ${fmtClock(decoded.durationSeconds)}. Check the title and date, then tap Transcribe.`;
+    $('import-title').value = importer.titleFromName(file.name);
+    $('import-when').value = toLocalInput(importer.defaultStart(file, decoded.durationSeconds));
+    $('import-form').hidden = false;
+    $('import-go').hidden = false;
+  } catch (err) {
+    console.error('[import]', err);
+    importError(err instanceof importer.ImportError ? err.message : `The file could not be read: ${err?.message || err}`);
+  }
+}
+
+async function startImport() {
+  if (!pendingImport || importing) return;
+  const when = new Date($('import-when').value);
+  if (Number.isNaN(when.getTime())) return importError('Enter a valid date and time.');
+  if (when.getTime() > Date.now() + 5 * 60 * 1000) {
+    $('import-error').textContent = 'The recording date cannot be in the future.';
+    $('import-error').hidden = false;
+    return;
+  }
+  importing = true;
+  $('import-go').disabled = true;
+  $('import-cancel').disabled = true;
+  $('import-error').hidden = true;
+  renderRecorder();
+  try {
+    await importer.prepare(pendingImport.buffer, {
+      title: $('import-title').value.trim(),
+      startedAt: when,
+      sourceName: pendingImport.file.name,
+    }, (done, total) => {
+      $('import-status').textContent = `Preparing part ${done} of ${total}…`;
+    });
+    notify('File queued. It uploads and transcribes like a recording.');
+    resetImport();
+    renderDeviceList();
+    pump();
+  } catch (err) {
+    console.error('[import]', err);
+    importing = false;
+    $('import-cancel').disabled = false;
+    importError(`Preparing the file failed: ${err?.message || err}`);
+    renderRecorder();
+  }
+}
+
 // --- wiring --------------------------------------------------------------------------------------
 
 function wire() {
@@ -453,6 +550,10 @@ function wire() {
   });
 
   $('btn-record').addEventListener('click', startRecording);
+  $('btn-upload').addEventListener('click', () => $('file-input').click());
+  $('file-input').addEventListener('change', onFileChosen);
+  $('import-go').addEventListener('click', startImport);
+  $('import-cancel').addEventListener('click', () => { if (!importing) resetImport(); });
   $('btn-stop').addEventListener('click', () => stopRecording('user'));
   $('btn-pause').addEventListener('click', async () => {
     if (recorder.state === 'paused') await recorder.resume();
@@ -461,7 +562,7 @@ function wire() {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.code !== 'Space' || currentView !== 'record' || e.repeat) return;
+    if (e.code !== 'Space' || currentView !== 'record' || e.repeat || importing || !$('import-panel').hidden) return;
     if (e.target.closest('input, textarea, select, button, a')) return;
     e.preventDefault();
     if (recorder.state === 'idle') startRecording();
@@ -478,7 +579,7 @@ function wire() {
     if (document.visibilityState === 'visible') pump();
   });
   window.addEventListener('beforeunload', (e) => {
-    if (recorder.state === 'recording' || recorder.state === 'paused') {
+    if (recorder.state === 'recording' || recorder.state === 'paused' || importing) {
       e.preventDefault();
       e.returnValue = '';
     }
@@ -497,6 +598,11 @@ async function init() {
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
+  try {
+    if (await store.discardInterruptedImports()) notify('A file upload was interrupted while being prepared. Please choose the file again.');
+  } catch (err) {
+    console.warn('[import cleanup]', err);
+  }
   try {
     const recovered = await recoverInterrupted(recorder.id);
     if (recovered.length) notify('A recording that was interrupted has been recovered and will be uploaded.', { sticky: true });

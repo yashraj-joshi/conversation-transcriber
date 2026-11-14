@@ -16,6 +16,7 @@ MODEL_PARAM, KEY_PARAM = "/ct/transcription-model", "/ct/openrouter-api-key"
 
 def make_deps(s3, responder, model="microsoft/mai-transcribe-2", key="sk-or-1", parallelism=4, diarize=True):
     transcriber._api_key_cache.clear()
+    transcriber._no_keyterms_field.clear()
     fake = FakeTranscriber(responder)
     keys_seen = []
 
@@ -160,6 +161,42 @@ class TranscriberTests(unittest.TestCase):
         self.assertIn("Vocabulary: not applied (rejected by provider)", s3.objects[TRANSCRIPT].decode())
         self.assertEqual(self.status(s3)["state"], "done")
         self.assertEqual(len(fake.payloads), 4)
+
+    def test_keyterms_field_rejected_uses_azure_phrase_list(self):
+        # Real OpenRouter behaviour for microsoft/mai-transcribe-2 (observed 2026-11-13).
+        s3 = FakeS3()
+        seed(s3, part_count=3)
+
+        def responder(payload):
+            if "keyterms" in payload:
+                raise OpenRouterError(400, "The selected model does not support keyterms. Remove the field "
+                                           "or choose a model whose provider supports it.")
+            return ok(payload)
+
+        deps, fake, _ = make_deps(s3, responder, parallelism=1)
+        transcriber.handler(event(), None, deps)
+        text = s3.objects[TRANSCRIPT].decode()
+        self.assertIn("Vocabulary: 2 terms (as Azure phrase list)", text)
+        self.assertEqual(len(fake.payloads), 4)  # one rejection, then the model is remembered
+        for p in fake.payloads[1:]:
+            self.assertNotIn("keyterms", p)
+            self.assertEqual(p["provider"]["options"]["azure"]["phraseList"]["phrases"], ["FastAPI", "pgvector"])
+
+    def test_phrase_list_also_rejected_drops_vocabulary(self):
+        s3 = FakeS3()
+        seed(s3, part_count=1)
+
+        def responder(payload):
+            if "keyterms" in payload:
+                raise OpenRouterError(400, "does not support keyterms")
+            if payload.get("provider", {}).get("options", {}).get("azure", {}).get("phraseList"):
+                raise OpenRouterError(400, "phraseList exceeds 200 phrases")
+            return ok(payload)
+
+        deps, fake, _ = make_deps(s3, responder)
+        transcriber.handler(event(), None, deps)
+        self.assertIn("Vocabulary: not applied (rejected by provider)", s3.objects[TRANSCRIPT].decode())
+        self.assertEqual(len(fake.payloads), 3)
 
     def test_missing_vocabulary_file(self):
         s3 = FakeS3()

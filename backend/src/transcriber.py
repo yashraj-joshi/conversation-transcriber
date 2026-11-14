@@ -57,6 +57,7 @@ class Deps:
 
 
 _api_key_cache: dict = {}
+_no_keyterms_field: set = set()  # models whose provider rejects OpenRouter `keyterms`
 
 
 def _error_code(exc) -> str:
@@ -141,11 +142,23 @@ def transcribe_part(deps: Deps, client, rid: str, part: dict, model: str, keyter
     audio_b64 = base64.b64encode(audio).decode("ascii")
 
     vocab_applied = bool(keyterms)
+    via_phrase_list = bool(keyterms) and model in _no_keyterms_field
     diarized = deps.config.diarize
     payload = core.build_transcription_request(model, audio_b64, fmt, keyterms, deps.config.data_collection,
-                                               diarize=diarized)
+                                               diarize=diarized, keyterms_field=not via_phrase_list)
     try:
-        result = client.transcribe(payload)
+        try:
+            result = client.transcribe(payload)
+        except OpenRouterError as exc:
+            if exc.status == 400 and "keyterms" in payload and core.rejects_keyterms_field(exc.message):
+                # e.g. MAI-Transcribe 2 on Azure: send the vocabulary as Azure's phraseList only.
+                log.info("model %s does not accept `keyterms`; using the provider phrase list", model)
+                _no_keyterms_field.add(model)
+                via_phrase_list = True
+                payload = core.drop_keyterms_field(payload)
+                result = client.transcribe(payload)
+            else:
+                raise
     except OpenRouterError as exc:
         if exc.status != 400:
             raise
@@ -155,8 +168,9 @@ def transcribe_part(deps: Deps, client, rid: str, part: dict, model: str, keyter
         result = None
         for feature in ("vocabulary", "speakers"):
             if feature == "vocabulary" and vocab_applied:
-                payload = {k: v for k, v in payload.items() if k != "keyterms"}
+                payload = core.drop_vocabulary(payload)
                 vocab_applied = False
+                via_phrase_list = False
             elif feature == "speakers" and diarized:
                 payload = core.drop_diarization(payload)
                 diarized = False
@@ -185,6 +199,7 @@ def transcribe_part(deps: Deps, client, rid: str, part: dict, model: str, keyter
         "cost": usage.get("cost"),
         "seconds": usage.get("seconds"),
         "vocabularyApplied": vocab_applied,
+        "vocabularyVia": "phraseList" if (vocab_applied and via_phrase_list) else ("keyterms" if vocab_applied else None),
     }
     put_json(deps.s3, deps.config.bucket, cache_key, record)
     return record
@@ -215,7 +230,8 @@ def process_manifest(deps: Deps, key: str):
 
         costs = [r["cost"] for r in results if isinstance(r.get("cost"), (int, float))]
         total_cost = sum(costs) if costs else None
-        vocab = core.vocabulary_status(len(keyterms), [r["vocabularyApplied"] for r in results])
+        vocab = core.vocabulary_status(len(keyterms), [r["vocabularyApplied"] for r in results],
+                                       any(r.get("vocabularyVia") == "phraseList" for r in results))
         speakers = core.speakers_status(deps.config.diarize, [r.get("speakersLabelled") for r in results])
         bodies = [core.part_body(r, r["index"]) for r in results]
         text = core.render_transcript(meta, bodies, model, vocab, total_cost, speakers)
