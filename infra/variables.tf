@@ -21,6 +21,12 @@ variable "transcription_model" {
   default     = "microsoft/mai-transcribe-2"
 }
 
+variable "summary_model" {
+  description = "INITIAL value of the SSM summary-model parameter (AI titles/summaries). Change later with scripts/set-model.sh --summary; set the parameter to \"none\" to turn titles off."
+  type        = string
+  default     = "anthropic/claude-haiku-5.5"
+}
+
 variable "openrouter_data_collection" {
   description = "OpenRouter provider.data_collection: \"deny\" routes only to providers that do not store/train on audio; \"allow\" relaxes it."
   type        = string

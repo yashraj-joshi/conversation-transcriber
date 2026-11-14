@@ -518,3 +518,141 @@ def transcript_item(key: str, size: int):
 
 def sort_newest_first(values):
     return sorted(values, reverse=True)
+
+
+# --- Deleted transcripts (spec 004 FR-002..FR-004) -------------------------------------------------
+
+TRASH_PREFIX = "trash/"
+TRASH_RETENTION_DAYS = 90
+_TRASH_KEY_RE = re.compile(r"^trash/(transcripts/\d{4}-\d{2}/[\w.-]+\.txt)$")
+
+
+def trash_key(transcript_key: str) -> str:
+    return TRASH_PREFIX + validate_transcript_key(transcript_key)
+
+
+def validate_trash_key(value) -> str:
+    if not isinstance(value, str) or not _TRASH_KEY_RE.match(value):
+        raise ValidationError("invalid deleted-transcript key")
+    validate_transcript_key(value[len(TRASH_PREFIX):])
+    return value
+
+
+def original_key(trash: str) -> str:
+    return validate_trash_key(trash)[len(TRASH_PREFIX):]
+
+
+def validate_readable_key(value) -> str:
+    """A transcript key or a deleted-transcript key (both may be read)."""
+    if isinstance(value, str) and value.startswith(TRASH_PREFIX):
+        return validate_trash_key(value)
+    return validate_transcript_key(value)
+
+
+def purge_date(deleted_at: datetime) -> datetime:
+    return deleted_at + timedelta(days=TRASH_RETENTION_DAYS)
+
+
+# --- Transcript header (spec 004 FR-006, FR-008) ---------------------------------------------------
+
+AI_TITLE_FIELD = "AI title"
+SUMMARY_FIELD = "Summary"
+MAX_AI_TITLE_LENGTH = 100
+MAX_SUMMARY_LENGTH = 400
+HEADER_READ_BYTES = 4096
+MAX_SUMMARY_INPUT_CHARS = 600_000
+
+
+def split_transcript(text: str):
+    """Return (header_lines, body). The header is everything before the first blank line."""
+    head, sep, body = (text or "").partition("\n\n")
+    return head.split("\n") if head else [], body
+
+
+def parse_header(text: str) -> dict:
+    fields = {}
+    lines, _ = split_transcript(text)
+    for line in lines:
+        key, sep, value = line.partition(": ")
+        if sep and key and key not in fields:
+            fields[key] = value.strip()
+    return fields
+
+
+def set_header_fields(text: str, values: dict) -> str:
+    """Insert or replace header fields; new ones go right after `Title:` (or at the top)."""
+    lines, body = split_transcript(text)
+    lines = [l for l in lines if l.partition(": ")[0] not in values]
+    at = 1 if lines and lines[0].startswith("Title: ") else 0
+    new = [f"{k}: {v}" for k, v in values.items() if v]
+    return "\n".join(lines[:at] + new + lines[at:]) + "\n\n" + body
+
+
+def display_title(fields: dict):
+    return fields.get("Title") or fields.get(AI_TITLE_FIELD) or None
+
+
+def _clean(value, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    text = text.strip(" \"'")
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def build_summary_request(model: str, body: str, data_collection) -> dict:
+    if not model or not isinstance(model, str):
+        raise ValidationError("summary model is not configured")
+    text = body if len(body) <= MAX_SUMMARY_INPUT_CHARS else body[:MAX_SUMMARY_INPUT_CHARS] + "\n[…truncated]"
+    payload = {
+        "model": model.strip(),
+        "temperature": 0.2,
+        "max_tokens": 400,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "transcript_title",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["title", "summary"],
+                    "properties": {"title": {"type": "string"}, "summary": {"type": "string"}},
+                },
+            },
+        },
+        "messages": [
+            {"role": "system", "content": (
+                "You title and summarize transcripts of spoken conversations. Write in the transcript's "
+                "language. The title is specific (names the main topics), at most 10 words, no quotes, no "
+                "trailing period. The summary is 1-2 plain sentences, at most 60 words. Reply with JSON only.")},
+            {"role": "user", "content": f"Transcript:\n\n{text}"},
+        ],
+    }
+    if data_collection in ("deny", "allow"):
+        payload["provider"] = {"data_collection": data_collection}
+    return payload
+
+
+def parse_summary_response(data: dict):
+    """Return (title, summary, cost) from a chat-completions response; raises ValueError if unusable."""
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("no message content") from exc
+    if isinstance(content, list):  # content parts
+        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    content = str(content or "").strip()
+    m = re.search(r"\{.*\}", content, re.S)
+    parsed = json.loads(m.group(0) if m else content)
+    title = _clean(parsed.get("title"), MAX_AI_TITLE_LENGTH).rstrip(".")
+    summary = _clean(parsed.get("summary"), MAX_SUMMARY_LENGTH)
+    if not title:
+        raise ValueError("empty title")
+    cost = (data.get("usage") or {}).get("cost")
+    return title, summary, cost if isinstance(cost, (int, float)) else None
+
+
+def has_speech(body: str) -> bool:
+    stripped = (body or "").strip()
+    return bool(stripped) and not stripped.startswith("(No speech was detected")

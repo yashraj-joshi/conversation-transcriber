@@ -11,6 +11,7 @@ s3://<project>-data-<account-id>/
 │   └── <recordingId>.json
 ├── work/                                    # per-part results (002); expires with audio/
 │   └── <recordingId>/part-NNN.json
+├── trash/transcripts/YYYY-MM/<name>.txt    # deleted transcripts (spec 004); purged 90 days after deletion
 ├── config/
 │   └── vocabulary.txt                       # custom vocabulary (002), uploaded by Terraform
 └── transcripts/                             # retained (bucket versioning on)

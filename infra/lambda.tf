@@ -12,6 +12,18 @@ resource "aws_ssm_parameter" "transcription_model" {
   }
 }
 
+# Model for AI titles/summaries (spec 004). Initial value only; change with scripts/set-model.sh --summary.
+resource "aws_ssm_parameter" "summary_model" {
+  name        = local.summary_param_name
+  description = "OpenRouter chat model used for transcript titles and summaries (\"none\" disables)"
+  type        = "String"
+  value       = var.summary_model
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 # OpenRouter API key. Placeholder only; the real value is written by scripts/set-openrouter-key.sh
 # so it never enters Terraform state or source control (Constitution III/IV).
 resource "aws_ssm_parameter" "openrouter_api_key" {
@@ -73,6 +85,23 @@ data "aws_iam_policy_document" "api" {
     resources = [
       "${aws_s3_bucket.data.arn}/status/*",
       "${aws_s3_bucket.data.arn}/transcripts/*",
+      "${aws_s3_bucket.data.arn}/trash/*",
+    ]
+  }
+  statement {
+    sid     = "DeleteRestore" # spec 004: move transcripts to/from trash/, purge the recording's audio
+    actions = ["s3:PutObject", "s3:DeleteObject"]
+    resources = [
+      "${aws_s3_bucket.data.arn}/transcripts/*",
+      "${aws_s3_bucket.data.arn}/trash/*",
+    ]
+  }
+  statement {
+    sid     = "PurgeAudio"
+    actions = ["s3:DeleteObject"]
+    resources = [
+      "${aws_s3_bucket.data.arn}/audio/*",
+      "${aws_s3_bucket.data.arn}/work/*",
     ]
   }
   statement {
@@ -82,7 +111,7 @@ data "aws_iam_policy_document" "api" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["audio/*", "status/*", "transcripts/", "transcripts/*"]
+      values   = ["audio/*", "status/*", "work/*", "transcripts/", "transcripts/*", "trash/*"]
     }
   }
 }
@@ -100,6 +129,7 @@ data "aws_iam_policy_document" "transcriber" {
       "${aws_s3_bucket.data.arn}/audio/*",
       "${aws_s3_bucket.data.arn}/status/*",
       "${aws_s3_bucket.data.arn}/work/*",
+      "${aws_s3_bucket.data.arn}/transcripts/*",
       "${aws_s3_bucket.data.arn}/${local.vocabulary_key}",
     ]
   }
@@ -119,13 +149,17 @@ data "aws_iam_policy_document" "transcriber" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["status/*", "work/*", local.vocabulary_key]
+      values   = ["status/*", "work/*", "transcripts/*", local.vocabulary_key]
     }
   }
   statement {
-    sid       = "Config"
-    actions   = ["ssm:GetParameter"]
-    resources = [aws_ssm_parameter.transcription_model.arn, aws_ssm_parameter.openrouter_api_key.arn]
+    sid     = "Config"
+    actions = ["ssm:GetParameter"]
+    resources = [
+      aws_ssm_parameter.transcription_model.arn,
+      aws_ssm_parameter.openrouter_api_key.arn,
+      aws_ssm_parameter.summary_model.arn,
+    ]
   }
 }
 
@@ -186,6 +220,7 @@ resource "aws_lambda_function" "transcriber" {
     variables = {
       DATA_BUCKET            = aws_s3_bucket.data.id
       MODEL_PARAM            = aws_ssm_parameter.transcription_model.name
+      SUMMARY_MODEL_PARAM    = aws_ssm_parameter.summary_model.name
       API_KEY_PARAM          = aws_ssm_parameter.openrouter_api_key.name
       VOCABULARY_KEY         = local.vocabulary_key
       DATA_COLLECTION        = var.openrouter_data_collection

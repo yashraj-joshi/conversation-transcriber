@@ -28,6 +28,11 @@ output "model_parameter" {
   value       = aws_ssm_parameter.transcription_model.name
 }
 
+output "summary_model_parameter" {
+  description = "SSM parameter holding the title/summary model id."
+  value       = aws_ssm_parameter.summary_model.name
+}
+
 output "api_key_parameter" {
   description = "SSM SecureString holding the OpenRouter API key."
   value       = aws_ssm_parameter.openrouter_api_key.name
@@ -35,4 +40,8 @@ output "api_key_parameter" {
 
 output "vocabulary_s3_uri" {
   value = "s3://${aws_s3_bucket.data.id}/${local.vocabulary_key}"
+}
+
+output "project_name" {
+  value = var.project
 }

@@ -82,6 +82,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
   }
 
   rule {
+    id     = "purge-deleted-transcripts" # spec 004: recoverable for 90 days after deletion
+    status = "Enabled"
+    filter {
+      prefix = "trash/"
+    }
+    expiration {
+      days = 90
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  rule {
     id     = "transcript-old-versions"
     status = "Enabled"
     filter {

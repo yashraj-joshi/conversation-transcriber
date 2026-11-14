@@ -80,6 +80,17 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(OpenRouterError):
             self.client([{"nope": 1}] * 4).transcribe({})
 
+    def test_chat_uses_chat_endpoint(self):
+        c = self.client([{"choices": [{"message": {"content": "{}"}}]}])
+        self.assertIn("choices", c.chat({"model": "anthropic/claude-haiku-5.5"}))
+        self.assertEqual(self.opener.requests[0].full_url, "https://openrouter.ai/api/v1/chat/completions")
+
+    def test_error_body_with_200_is_error(self):
+        c = self.client([{"error": {"code": 402, "message": "Insufficient credits"}}])
+        with self.assertRaises(OpenRouterError) as ctx:
+            c.chat({})
+        self.assertEqual(ctx.exception.status, 402)
+
     def test_requires_key(self):
         with self.assertRaises(OpenRouterError):
             OpenRouterClient("")

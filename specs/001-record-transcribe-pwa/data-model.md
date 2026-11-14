@@ -44,6 +44,8 @@ UTF-8 plain text:
 
 ```text
 Title: Weekly sync            (only if provided)
+AI title: Weekly sync on Fargate migration   (spec 004; generated)
+Summary: The team agreed to … (1-2 sentences, spec 004)
 Recorded: 2026-11-11 14:30:05 (UTC-08:00)
 Duration: 00:42:17
 Model: microsoft/mai-transcribe-2

@@ -5,6 +5,9 @@ project = "conversation-transcriber"
 # Initial transcription model. After the first apply, change it with: ./scripts/set-model.sh <model>
 transcription_model = "microsoft/mai-transcribe-2"
 
+# Initial model for AI titles/summaries. Change later with: ./scripts/set-model.sh --summary <model>
+summary_model = "anthropic/claude-haiku-5.5"
+
 # "deny" = only providers that don't store/train on audio. Set "allow" only if OpenRouter reports no provider.
 openrouter_data_collection = "deny"
 

@@ -175,7 +175,9 @@ async function renderDeviceList() {
       actions.push(el('button', { type: 'button', class: 'btn small primary', onclick: () => retry(rec.id) }, 'Retry'));
     }
     if (rec.state === 'done' || rec.state === 'failed') {
-      actions.push(el('button', { type: 'button', class: 'btn small subtle', onclick: () => forget(rec.id) }, 'Remove'));
+      actions.push(el('button', {
+        type: 'button', class: 'btn small subtle', title: 'Hide from this list (the stored transcript is kept)', onclick: () => forget(rec.id),
+      }, 'Hide'));
     }
     list.append(el('li', { class: 'device-item' },
       el('div', { class: 'device-main' },
@@ -312,11 +314,26 @@ async function poll() {
   if (active) ensurePolling();
 }
 
-// --- transcripts ---------------------------------------------------------------------------------
+// --- transcripts (list, viewer, delete/restore: spec 004) -----------------------------------------
 
+const DELETED = '__deleted__';
 let selectedMonth = null;
 let openKey = null;
 let openText = '';
+let monthsCache = [];
+
+function fmtDay(iso) {
+  return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+}
+
+function headerFields(text) {
+  const fields = {};
+  for (const line of text.split('\n\n')[0].split('\n')) {
+    const i = line.indexOf(': ');
+    if (i > 0 && !(line.slice(0, i) in fields)) fields[line.slice(0, i)] = line.slice(i + 2);
+  }
+  return fields;
+}
 
 async function loadMonths() {
   let months;
@@ -327,64 +344,94 @@ async function loadMonths() {
     notify(`Could not load transcripts: ${err.message}`);
     return;
   }
+  monthsCache = months;
+  if (selectedMonth !== DELETED && !months.includes(selectedMonth)) selectedMonth = months[0] || DELETED;
   const box = $('months');
   box.replaceChildren();
-  $('tx-empty').hidden = months.length > 0;
-  if (!months.includes(selectedMonth)) selectedMonth = months[0] || null;
+  const chip = (value, label) => el('button', {
+    type: 'button', class: `month${value === DELETED ? ' deleted' : ''}`, role: 'tab',
+    'aria-selected': value === selectedMonth ? 'true' : 'false',
+    onclick: () => { selectedMonth = value; loadMonths(); },
+  }, label);
   for (const m of months) {
-    const label = new Date(`${m}-01T12:00:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
-    box.append(el('button', {
-      type: 'button', class: 'month', role: 'tab', 'aria-selected': m === selectedMonth ? 'true' : 'false',
-      onclick: () => { selectedMonth = m; loadMonths(); },
-    }, label));
+    box.append(chip(m, new Date(`${m}-01T12:00:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })));
   }
-  if (selectedMonth) loadItems(selectedMonth);
-  else $('tx-items').replaceChildren();
+  box.append(chip(DELETED, 'Deleted'));
+  loadItems(selectedMonth);
+}
+
+function itemButton(item, { deleted = false } = {}) {
+  const [date, time] = item.recordedAt.split(' ');
+  const when = new Date(`${date}T${time}`);
+  const whenText = `${when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · ${when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+  return el('button', {
+    type: 'button', class: `tx-item${item.key === openKey ? ' active' : ''}`,
+    onclick: () => openTranscript(item.key),
+  },
+  el('span', { class: 'tx-item-title' }, item.title || whenText),
+  el('span', { class: 'tx-item-date' }, item.title ? whenText : (deleted ? '' : 'No title yet')),
+  item.summary ? el('span', { class: 'tx-item-summary' }, item.summary) : null,
+  deleted ? el('span', { class: 'tx-item-deleted' }, `Deleted ${fmtDay(item.deletedAt)} · removed permanently ${fmtDay(item.purgeAt)}`) : null);
 }
 
 async function loadItems(month) {
+  const list = $('tx-items');
   let items;
   try {
-    items = await api.listTranscripts(month);
+    items = month === DELETED ? await api.listDeleted() : month ? await api.listTranscripts(month) : [];
   } catch (err) {
     if (err instanceof auth.AuthError) return requireSignIn(err.message);
-    notify(`Could not load ${month}: ${err.message}`);
+    notify(`Could not load ${month === DELETED ? 'deleted transcripts' : month}: ${err.message}`);
     return;
   }
-  const list = $('tx-items');
-  list.replaceChildren();
-  for (const item of items) {
-    const [date, time] = item.recordedAt.split(' ');
-    const when = new Date(`${date}T${time}`);
-    list.append(el('li', {},
-      el('button', {
-        type: 'button', class: `tx-item${item.key === openKey ? ' active' : ''}`,
-        onclick: () => openTranscript(item.key),
-      },
-      el('span', { class: 'tx-item-date' }, when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })),
-      el('span', { class: 'tx-item-time' }, when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })))));
-  }
+  if (month !== selectedMonth) return; // user switched meanwhile
+  list.replaceChildren(...items.map((item) => el('li', {}, itemButton(item, { deleted: month === DELETED }))));
+  $('tx-empty').hidden = items.length > 0;
+  $('tx-empty').textContent = month === DELETED
+    ? 'Nothing deleted. Deleted transcripts stay here for 90 days.'
+    : (monthsCache.length ? 'No transcripts in this month.' : 'No transcripts yet.');
+}
+
+function clearViewer() {
+  openKey = null;
+  openText = '';
+  $('tx-title').textContent = 'Select a transcript';
+  $('tx-meta').textContent = '';
+  $('tx-summary').hidden = true;
+  $('tx-deleted-banner').hidden = true;
+  $('tx-text').textContent = '';
+  for (const id of ['tx-copy', 'tx-share', 'tx-download', 'tx-delete', 'tx-restore']) $(id).disabled = true;
+  $('tx-delete').hidden = false;
+  $('tx-restore').hidden = true;
+  $('tx-layout').classList.remove('has-selection');
 }
 
 async function openTranscript(key) {
+  const deleted = key.startsWith('trash/');
   if (currentView !== 'transcripts') {
-    selectedMonth = key.split('/')[1];
+    selectedMonth = deleted ? DELETED : key.split('/')[1];
     show('transcripts');
   }
   openKey = key;
   $('tx-title').textContent = 'Loading…';
+  $('tx-meta').textContent = '';
+  $('tx-summary').hidden = true;
   $('tx-text').textContent = '';
   $('tx-layout').classList.add('has-selection');
   try {
     openText = await api.getTranscript(key);
   } catch (err) {
     if (err instanceof auth.AuthError) return requireSignIn(err.message);
-    $('tx-title').textContent = 'Could not load transcript';
-    $('tx-text').textContent = err.message;
+    $('tx-title').textContent = err.status === 404 ? 'This transcript was deleted or moved' : 'Could not load transcript';
+    $('tx-text').textContent = err.status === 404 ? 'Check the Deleted section.' : err.message;
     return;
   }
-  const title = (openText.match(/^Title: (.+)$/m) || [])[1];
-  $('tx-title').textContent = title || key.split('/').pop().replace(/\.txt$/, '');
+  if (openKey !== key) return;
+  const fields = headerFields(openText);
+  $('tx-title').textContent = fields.Title || fields['AI title'] || key.split('/').pop().replace(/\.txt$/, '');
+  $('tx-meta').textContent = [fields.Recorded, fields.Duration].filter(Boolean).join(' · ');
+  $('tx-summary').textContent = fields.Summary || '';
+  $('tx-summary').hidden = !fields.Summary;
   $('tx-text').textContent = openText;
   const canShare = typeof navigator.share === 'function';
   $('tx-copy').disabled = false;
@@ -392,8 +439,49 @@ async function openTranscript(key) {
   $('tx-share').disabled = false;
   $('tx-download').hidden = canShare;
   $('tx-download').disabled = false;
+  $('tx-delete').hidden = deleted;
+  $('tx-delete').disabled = deleted;
+  $('tx-restore').hidden = !deleted;
+  $('tx-restore').disabled = !deleted;
+  $('tx-deleted-banner').hidden = !deleted;
+  if (deleted) $('tx-deleted-banner').textContent = 'This transcript is in Deleted. It is removed permanently 90 days after it was deleted. Restore it to keep it.';
   document.querySelectorAll('.tx-item').forEach((b) => b.classList.remove('active'));
   if (selectedMonth) loadItems(selectedMonth);
+}
+
+async function deleteOpenTranscript() {
+  if (!openKey || openKey.startsWith('trash/')) return;
+  const name = $('tx-title').textContent;
+  if (!window.confirm(`Delete "${name}"?\n\nIt moves to Deleted, where you can restore it for 90 days. Its raw audio is removed now.`)) return;
+  $('tx-delete').disabled = true;
+  try {
+    const result = await api.deleteTranscript(openKey);
+    if (result.recordingId) await store.deleteRecording(result.recordingId).catch(() => {});
+    notify(`Deleted. Restore it from Deleted until ${fmtDay(result.purgeAt)}.`);
+    clearViewer();
+    loadMonths();
+    renderDeviceList();
+  } catch (err) {
+    if (err instanceof auth.AuthError) return requireSignIn(err.message);
+    $('tx-delete').disabled = false;
+    notify(`Delete failed: ${err.message}`);
+  }
+}
+
+async function restoreOpenTranscript() {
+  if (!openKey || !openKey.startsWith('trash/')) return;
+  $('tx-restore').disabled = true;
+  try {
+    const { key } = await api.restoreTranscript(openKey);
+    notify('Transcript restored.');
+    selectedMonth = key.split('/')[1];
+    await loadMonths();
+    openTranscript(key);
+  } catch (err) {
+    if (err instanceof auth.AuthError) return requireSignIn(err.message);
+    $('tx-restore').disabled = false;
+    notify(err.status === 409 ? 'Cannot restore: a transcript with the same name already exists.' : `Restore failed: ${err.message}`);
+  }
 }
 
 async function copyTranscript() {
@@ -473,7 +561,7 @@ async function onFileChosen() {
     if ($('import-panel').hidden) return; // cancelled meanwhile
     pendingImport = { file, ...decoded };
     $('import-status').textContent = `Length ${fmtClock(decoded.durationSeconds)}. Check the title and date, then tap Transcribe.`;
-    $('import-title').value = importer.titleFromName(file.name);
+    $('import-title').value = ''; // generated automatically from the transcript (spec 004)
     $('import-when').value = toLocalInput(importer.defaultStart(file, decoded.durationSeconds));
     $('import-form').hidden = false;
     $('import-go').hidden = false;
@@ -573,6 +661,8 @@ function wire() {
   $('tx-copy').addEventListener('click', copyTranscript);
   $('tx-share').addEventListener('click', shareTranscript);
   $('tx-download').addEventListener('click', downloadTranscript);
+  $('tx-delete').addEventListener('click', deleteOpenTranscript);
+  $('tx-restore').addEventListener('click', restoreOpenTranscript);
 
   window.addEventListener('online', pump);
   document.addEventListener('visibilitychange', () => {

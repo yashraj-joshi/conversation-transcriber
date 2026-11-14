@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Conversation Transcriber API
-  version: 1.1.0
+  version: 1.2.0
   description: >
     HTTP API (API Gateway v2). Every route requires `Authorization: Bearer <Cognito ID token>`.
     Errors use `{ "error": "<message>" }` with 400/401/404/409/500.
@@ -36,6 +36,17 @@ components:
         name: { type: string, example: 2026-11-11_14-30-05_3f2c9a1b.txt }
         recordedAt: { type: string, example: "2026-11-11 14:30:05" }
         size: { type: integer }
+        title: { type: string, nullable: true, description: "Owner title, else AI title (spec 004)" }
+        summary: { type: string, nullable: true }
+    DeletedItem:
+      allOf:
+        - $ref: "#/components/schemas/TranscriptItem"
+        - type: object
+          properties:
+            key: { type: string, example: trash/transcripts/2026-11/2026-11-11_14-30-05_3f2c9a1b.txt }
+            originalKey: { type: string }
+            deletedAt: { type: string, format: date-time }
+            purgeAt: { type: string, format: date-time }
 paths:
   /uploads:
     post:
@@ -121,9 +132,28 @@ paths:
                 properties:
                   month: { type: string }
                   items: { type: array, items: { $ref: "#/components/schemas/TranscriptItem" } }
+  /transcripts/delete:
+    post:
+      summary: Move a transcript to trash/ (restorable 90 days) and delete its recording's audio (spec 004)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [key], properties: { key: { type: string } } } } } }
+      responses:
+        "200": { description: "{ key (trash key), recordingId, removedAudioObjects, deletedAt, purgeAt }" }
+        "404": { description: Not found }
+  /transcripts/deleted:
+    get:
+      summary: Deleted transcripts, newest deletion first
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/DeletedItem" } } } } } } }
+  /transcripts/restore:
+    post:
+      summary: Move a deleted transcript back to its original key
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [key], properties: { key: { type: string, description: trash key } } } } } }
+      responses:
+        "200": { description: "{ key }" }
+        "409": { description: A transcript with the same name already exists }
   /transcript:
     get:
-      summary: Full transcript text
+      summary: Full transcript text (also accepts trash/… keys)
       parameters:
         - { name: key, in: query, required: true, schema: { type: string } }
       responses:

@@ -9,5 +9,6 @@ locals {
 
   model_param_name   = "/${var.project}/transcription-model"
   api_key_param_name = "/${var.project}/openrouter-api-key"
+  summary_param_name = "/${var.project}/summary-model"
   vocabulary_key     = "config/vocabulary.txt"
 }

@@ -4,6 +4,7 @@ import io
 import os
 import sys
 import threading
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -20,19 +21,50 @@ class FakeS3:
         self.metadata = {}
         self.page_size = page_size
         self.puts = []
+        self.modified = {}
         self.lock = threading.Lock()
+        self.clock = datetime(2026, 11, 14, 12, 0, 0, tzinfo=timezone.utc)
 
     def put_object(self, Bucket, Key, Body, ContentType=None, Metadata=None):
         with self.lock:
             self.objects[Key] = Body if isinstance(Body, bytes) else Body.encode("utf-8")
             self.metadata[Key] = Metadata or {}
+            self.modified[Key] = self.clock
             self.puts.append(Key)
 
-    def get_object(self, Bucket, Key):
+    def get_object(self, Bucket, Key, Range=None):
         with self.lock:
             if Key not in self.objects:
                 raise FakeClientError("NoSuchKey")
-            return {"Body": io.BytesIO(self.objects[Key])}
+            data = self.objects[Key]
+            if Range:
+                lo, hi = Range.split("=")[1].split("-")
+                data = data[int(lo):int(hi) + 1]
+            return {"Body": io.BytesIO(data), "Metadata": dict(self.metadata.get(Key, {}))}
+
+    def head_object(self, Bucket, Key):
+        with self.lock:
+            if Key not in self.objects:
+                raise FakeClientError("404")
+            return {"Metadata": dict(self.metadata.get(Key, {})), "ContentLength": len(self.objects[Key])}
+
+    def copy_object(self, Bucket, Key, CopySource, MetadataDirective="COPY"):
+        src = CopySource["Key"]
+        with self.lock:
+            if src not in self.objects:
+                raise FakeClientError("NoSuchKey")
+            self.objects[Key] = self.objects[src]
+            self.metadata[Key] = dict(self.metadata.get(src, {}))
+            self.modified[Key] = self.clock
+
+    def delete_object(self, Bucket, Key):
+        with self.lock:
+            self.objects.pop(Key, None)
+            self.metadata.pop(Key, None)
+
+    def delete_objects(self, Bucket, Delete):
+        for o in Delete["Objects"]:
+            self.delete_object(Bucket, o["Key"])
 
     def list_objects_v2(self, Bucket, Prefix="", Delimiter=None, ContinuationToken=None):
         keys = sorted(k for k in self.objects if k.startswith(Prefix))
@@ -51,7 +83,8 @@ class FakeS3:
         start = int(ContinuationToken or 0)
         page = entries[start:start + self.page_size]
         result = {
-            "Contents": [{"Key": v, "Size": len(self.objects[v])} for t, v in page if t == "K"],
+            "Contents": [{"Key": v, "Size": len(self.objects[v]), "LastModified": self.modified.get(v, self.clock)}
+                         for t, v in page if t == "K"],
             "CommonPrefixes": [{"Prefix": v} for t, v in page if t == "P"],
             "IsTruncated": start + self.page_size < len(entries),
         }

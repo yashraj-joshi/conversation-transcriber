@@ -13,6 +13,7 @@ import urllib.request
 import core
 
 DEFAULT_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
+CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 BACKOFF_SECONDS = (2, 4, 8)
 MAX_RETRY_AFTER = 20
 
@@ -52,7 +53,7 @@ class OpenRouterClient:
         self._max_attempts = max_attempts
         self._app_title = app_title
 
-    def _request(self, payload: dict):
+    def _request(self, payload: dict, url: str | None = None):
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -61,20 +62,32 @@ class OpenRouterClient:
         if self._app_title:
             headers["X-Title"] = self._app_title
         return urllib.request.Request(
-            self._url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+            url or self._url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
 
     def transcribe(self, payload: dict) -> dict:
         """Send one transcription request, retrying transient failures. Returns the parsed JSON."""
+        return self._post(payload, None, "text")
+
+    def chat(self, payload: dict) -> dict:
+        """Send one chat-completions request (titles/summaries, spec 004)."""
+        return self._post(payload, CHAT_URL, "choices")
+
+    def _post(self, payload: dict, url, required_field: str) -> dict:
         last_error = None
         for attempt in range(self._max_attempts):
             retry_after = None
             try:
-                with self._open(self._request(payload), timeout=self._timeout) as resp:
+                with self._open(self._request(payload, url), timeout=self._timeout) as resp:
                     body = resp.read()
                 data = json.loads(body.decode("utf-8"))
-                if not isinstance(data, dict) or "text" not in data:
-                    raise OpenRouterError(502, "response has no 'text' field")
+                if isinstance(data, dict) and "error" in data and required_field not in data:
+                    err = data["error"]
+                    code = err.get("code") if isinstance(err, dict) else None
+                    raise OpenRouterError(code if isinstance(code, int) else 502,
+                                          str(err.get("message") if isinstance(err, dict) else err))
+                if not isinstance(data, dict) or required_field not in data:
+                    raise OpenRouterError(502, f"response has no '{required_field}' field")
                 return data
             except urllib.error.HTTPError as exc:
                 raw = exc.read() if hasattr(exc, "read") else b""

@@ -52,7 +52,7 @@
         <div class="timer" id="timer" aria-live="off">00:00:00</div>
         <div class="rec-state" id="rec-state">Ready</div>
         <label class="title-field">Title (optional)
-          <input type="text" id="title" maxlength="120" placeholder="e.g. Weekly sync">
+          <input type="text" id="title" maxlength="120" placeholder="Leave blank to generate one">
         </label>
         <div class="controls">
           <button type="button" class="btn primary big" id="btn-record">Record</button>
@@ -74,7 +74,7 @@
         <p class="hint" id="import-status" aria-live="polite"></p>
         <p class="error" id="import-error" role="alert" hidden></p>
         <div id="import-form" hidden>
-          <label>Title<input type="text" id="import-title" maxlength="120"></label>
+          <label>Title (optional)<input type="text" id="import-title" maxlength="120" placeholder="Leave blank to generate one"></label>
           <label>Recorded at (sets the month folder and file name)
             <input type="datetime-local" id="import-when" step="1" required>
           </label>
@@ -102,8 +102,13 @@
             <button type="button" class="btn" id="tx-copy" disabled>Copy</button>
             <button type="button" class="btn" id="tx-share" hidden disabled>Share</button>
             <button type="button" class="btn" id="tx-download" hidden disabled>Download</button>
+            <button type="button" class="btn danger-outline" id="tx-delete" disabled>Delete</button>
+            <button type="button" class="btn primary" id="tx-restore" hidden disabled>Restore</button>
           </div>
+          <p class="banner-inline" id="tx-deleted-banner" hidden></p>
           <h2 class="tx-title" id="tx-title">Select a transcript</h2>
+          <p class="tx-meta" id="tx-meta"></p>
+          <p class="tx-summary" id="tx-summary" hidden></p>
           <pre class="tx-text" id="tx-text"></pre>
         </article>
       </div>

@@ -10,9 +10,13 @@ terms (and can optionally label who is speaking), and the transcript is saved to
 transcripts/2026-11/2026-11-11_14-30-05_3f2c9a1b.txt
 ```
 
-Everything runs serverless on AWS and is deployed with Terraform. Specs: [001 record & transcribe](specs/001-record-transcribe-pwa/spec.md),
+Everything runs serverless on AWS and is deployed with Terraform. Each transcript gets an AI title and a short summary (Claude Haiku 5.5 via OpenRouter). Deleted
+transcripts can be restored for 90 days.
+
+Specs: [001 record & transcribe](specs/001-record-transcribe-pwa/spec.md),
 [002 OpenRouter, model & vocabulary](specs/002-openrouter-transcription/spec.md),
-[003 upload a file](specs/003-upload-audio-file/spec.md).
+[003 upload a file](specs/003-upload-audio-file/spec.md),
+[004 delete/restore, AI titles](specs/004-transcript-delete-and-titles/spec.md).
 
 ## How it works
 
@@ -31,8 +35,10 @@ Everything runs serverless on AWS and is deployed with Terraform. Specs: [001 re
    │                                          ── reads key    ◀─ SSM /<project>/openrouter-api-key (SecureString)
    │                                          ── reads terms  ◀─ S3  config/vocabulary.txt
    │                                          ── 4 parts at a time ─▶ OpenRouter /api/v1/audio/transcriptions
+   │                                          ── title + summary ─▶ OpenRouter chat (anthropic/claude-haiku-5.5)
    │                                          ── writes transcripts/YYYY-MM/…txt + status/<id>.json
-   └─ GET status / months / transcripts ─▶ api Lambda
+   ├─ GET status / months / transcripts ─▶ api Lambda (titles read from each transcript's header)
+   └─ delete / restore ──────────────────▶ api Lambda: transcripts/… ⇄ trash/transcripts/… (purged after 90 days)
  CloudFront (HTTPS, CSP) ─▶ private S3 bucket with the static PWA (no build step)
 ```
 
@@ -50,7 +56,7 @@ config/             vocabulary.txt — the custom vocabulary (one term per line)
 frontend/           static PWA: index.html, app.js, recorder.js, importer.js, pcm-worklet.js, wav.js, store.js, auth.js, api.js, sw.js
 frontend/tests/     node --test suite (WAV/resampler) + headless-Chrome test (app page, file import)
 infra/              Terraform (S3, CloudFront, Cognito, API Gateway, Lambda, SSM)
-scripts/            set-openrouter-key.sh · set-model.sh · push-vocabulary.sh · create-user.sh · make_icons.py
+scripts/            set-openrouter-key.sh · set-model.sh · push-vocabulary.sh · retitle.sh · create-user.sh · make_icons.py
 specs/              Spec Kit specs, plans, tasks
 ```
 
@@ -110,7 +116,21 @@ limits (3 hours, 500 MB), and costs are identical. The transcript header shows `
 On iPhone, files up to about an hour work reliably. Use a computer for longer files, because decoding
 happens in memory. Converted WAV is about 115 MB per hour to upload, often more than the original file.
 
-## 4. Change the transcription model
+## 4. Titles, summaries, delete and restore
+
+- **Titles and summaries:** each new transcript gets an `AI title:` and a `Summary:` line at the top. They are
+  written by Claude Haiku 5.5 (`anthropic/claude-haiku-5.5`) through OpenRouter and cost about US$0.001 per
+  hour of audio. The Transcripts list shows the title, the date and time, and the summary. A title you
+  type when recording takes precedence. If title generation fails, the transcript is still saved.
+- **Older transcripts:** add titles with `./scripts/retitle.sh 2026-11` (one month per run; `--force`
+  regenerates them).
+- **Change or turn off the title model:** `./scripts/set-model.sh --summary <model>`, or `none` to turn it off.
+- **Delete:** open a transcript and tap **Delete**. It moves to **Deleted** (the last chip in the
+  Transcripts tab). That recording's raw audio is removed at the same time. Open it there and tap **Restore**
+  to put it back in its month. Deleted transcripts are removed permanently 90 days after deletion.
+- **Hide** in "On this device" only clears that device's local history. It never deletes a transcript.
+
+## 5. Change the transcription model
 
 The model id is the SSM String parameter `/<project>/transcription-model`. A change applies to the **next
 recording**, with no redeploy, and `terraform apply` will not overwrite it.
@@ -124,7 +144,7 @@ Pick a model that accepts WAV audio (most speech-to-text models do). If a model 
 the recording shows Failed with the provider's message, and Retry works after you switch back. Each
 transcript's header records the model that produced it.
 
-## 5. Edit the custom vocabulary
+## 6. Edit the custom vocabulary
 
 `config/vocabulary.txt` holds one term per line. Blank lines and lines starting with `#` are ignored,
 duplicates are removed, and terms longer than 100 characters are skipped. Up to 1000 terms are sent with
@@ -141,7 +161,7 @@ without it. The transcript header then says `Vocabulary: not applied (rejected b
 recommends at most ~200 phrases for its phrase lists. If you see that message, shorten the list to your
 most important terms.
 
-## 6. Speaker labels
+## 7. Speaker labels
 
 Off by default. To turn them on, set `speaker_labels = true` in `infra/terraform.tfvars` and run
 `terraform -chdir=infra apply`. Transcripts then look like this:
@@ -158,7 +178,7 @@ The model labels each 5-minute part on its own, so numbers can change between se
 keep the timeline continuous. If a model doesn't support speaker labels, the part is transcribed as plain
 text.
 
-## 7. Local frontend development
+## 8. Local frontend development
 
 ```bash
 # 1. allow the local origin, then apply:   extra_allowed_origins = ["http://localhost:8000"]  in terraform.tfvars
@@ -174,6 +194,7 @@ python3 -m http.server -d frontend 8000              # open http://localhost:800
 | Setting | Where | Default |
 |---|---|---|
 | Transcription model | SSM `/<project>/transcription-model` (`scripts/set-model.sh`) | `microsoft/mai-transcribe-2` |
+| Title/summary model | SSM `/<project>/summary-model` (`scripts/set-model.sh --summary`) | `anthropic/claude-haiku-5.5` |
 | OpenRouter API key | SSM SecureString `/<project>/openrouter-api-key` (`scripts/set-openrouter-key.sh`) | placeholder |
 | Custom vocabulary | `config/vocabulary.txt` → `s3://<data-bucket>/config/vocabulary.txt` | 313 terms |
 | Privacy routing | `openrouter_data_collection` (tfvars) | `deny` (only providers that don't store/train on audio) |
@@ -188,6 +209,8 @@ python3 -m http.server -d frontend 8000              # open http://localhost:800
   personal scale; S3 costs cents.
 - **Transcription:** MAI-Transcribe 2 on OpenRouter costs about **US$0.10 per hour of audio**. The transcript
   header shows the cost reported by OpenRouter.
+- **Titles and summaries:** Claude Haiku 5.5 costs about US$0.001 per hour of audio ($0.10/M input,
+  $0.50/M output tokens).
 - **Storage:** WAV is about 115 MB per hour. Raw audio is deleted after 30 days, so a heavy month is about
   1–2 GB, roughly US$0.03.
 - **Mobile data:** about 115 MB per hour of recording. Uploads run in the background during recording.

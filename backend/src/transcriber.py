@@ -33,6 +33,7 @@ class Config:
     data_collection: str = "deny"
     parallelism: int = 4
     diarize: bool = False
+    summary_model_param: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -44,6 +45,7 @@ class Config:
             data_collection=os.environ.get("DATA_COLLECTION", "deny"),
             parallelism=max(1, int(os.environ.get("TRANSCRIBE_PARALLELISM", "4"))),
             diarize=os.environ.get("DIARIZE", "false").strip().lower() in ("1", "true", "yes"),
+            summary_model_param=os.environ.get("SUMMARY_MODEL_PARAM", ""),
         )
 
 
@@ -205,6 +207,38 @@ def transcribe_part(deps: Deps, client, rid: str, part: dict, model: str, keyter
     return record
 
 
+def summarize(deps: Deps, client, body: str):
+    """AI title + summary (spec 004). Returns (title, summary, cost) or None; never raises."""
+    if not deps.config.summary_model_param or not core.has_speech(body):
+        return None
+    try:
+        model = deps.ssm.get_parameter(Name=deps.config.summary_model_param)["Parameter"]["Value"].strip()
+        if not model or model.lower() in ("none", "off"):
+            return None
+        data = client.chat(core.build_summary_request(model, body, deps.config.data_collection))
+        return core.parse_summary_response(data)
+    except Exception as exc:  # noqa: BLE001 - FR-007: a title failure never fails the transcript
+        log.warning("title/summary failed: %s", str(exc)[:300])
+        return None
+
+
+def add_summary(text: str, result, cost):
+    """Write AI title/summary into the header and fold their cost into `Cost:`."""
+    if not result:
+        return text
+    title, summary, extra = result
+    fields = {core.AI_TITLE_FIELD: title, core.SUMMARY_FIELD: summary}
+    if extra is not None:
+        lines, body = core.split_transcript(text)
+        total = (cost or 0) + extra
+        lines = [f"Cost: US${total:.4f}" if l.startswith("Cost: ") else l for l in lines]
+        if not any(l.startswith("Cost: ") for l in lines):
+            lines.insert(len(lines) - 1 if lines and lines[-1].startswith("Recording ID: ") else len(lines),
+                         f"Cost: US${total:.4f}")
+        text = "\n".join(lines) + "\n\n" + body
+    return core.set_header_fields(text, fields)
+
+
 def process_manifest(deps: Deps, key: str):
     rid = core.recording_id_from_manifest_key(key)
     status = get_json(deps.s3, deps.config.bucket, core.status_key(rid))
@@ -235,6 +269,7 @@ def process_manifest(deps: Deps, key: str):
         speakers = core.speakers_status(deps.config.diarize, [r.get("speakersLabelled") for r in results])
         bodies = [core.part_body(r, r["index"]) for r in results]
         text = core.render_transcript(meta, bodies, model, vocab, total_cost, speakers)
+        text = add_summary(text, summarize(deps, client, core.split_transcript(text)[1]), total_cost)
         out_key = core.transcript_key(rid, meta["startedAt"], meta["tzOffsetMinutes"])
         deps.s3.put_object(
             Bucket=deps.config.bucket, Key=out_key, Body=text.encode("utf-8"),
@@ -278,11 +313,49 @@ def _default_deps() -> Deps:
 _deps = None
 
 
+def retitle(deps: Deps, month: str, force: bool = False):
+    """One-off backfill (spec 004 FR-009): add AI title/summary to a month's transcripts."""
+    month = core.validate_month(month)
+    client = deps.client_factory(load_api_key(deps))
+    done, skipped, failed = [], [], []
+    token = None
+    while True:
+        kwargs = {"Bucket": deps.config.bucket, "Prefix": f"transcripts/{month}/"}
+        if token:
+            kwargs["ContinuationToken"] = token
+        page = deps.s3.list_objects_v2(**kwargs)
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            src = deps.s3.get_object(Bucket=deps.config.bucket, Key=key)
+            text = src["Body"].read().decode("utf-8")
+            fields = core.parse_header(text)
+            if fields.get(core.AI_TITLE_FIELD) and not force:
+                skipped.append(key)
+                continue
+            result = summarize(deps, client, core.split_transcript(text)[1])
+            if not result:
+                failed.append(key)
+                continue
+            cost_line = fields.get("Cost", "").replace("US$", "")
+            cost = float(cost_line) if cost_line.replace(".", "", 1).isdigit() else None
+            new = add_summary(text, result, cost)
+            deps.s3.put_object(Bucket=deps.config.bucket, Key=key, Body=new.encode("utf-8"),
+                               ContentType="text/plain; charset=utf-8", Metadata=src.get("Metadata") or {})
+            done.append(key)
+        if not page.get("IsTruncated"):
+            break
+        token = page.get("NextContinuationToken")
+    log.info("retitle %s: %d updated, %d skipped, %d failed", month, len(done), len(skipped), len(failed))
+    return {"updated": done, "skipped": skipped, "failed": failed}
+
+
 def handler(event, context, deps: Deps | None = None):
     global _deps
     if deps is None:
         _deps = _deps or _default_deps()
         deps = _deps
+    if event.get("action") == "retitle":
+        return retitle(deps, event.get("month"), bool(event.get("force")))
     results = []
     for record in event.get("Records", []):
         key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])

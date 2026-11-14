@@ -41,6 +41,9 @@ export const getStatus = (id) => call('GET', `/recordings/${id}`).then((r) => r.
 export const listMonths = () => call('GET', '/transcripts/months').then((r) => r.data.months);
 export const listTranscripts = (month) =>
   call('GET', `/transcripts?month=${encodeURIComponent(month)}`).then((r) => r.data.items);
+export const deleteTranscript = (key) => call('POST', '/transcripts/delete', { key }).then((r) => r.data);
+export const listDeleted = () => call('GET', '/transcripts/deleted').then((r) => r.data.items);
+export const restoreTranscript = (key) => call('POST', '/transcripts/restore', { key }).then((r) => r.data);
 export const getTranscript = (key) =>
   call('GET', `/transcript?key=${encodeURIComponent(key)}`).then((r) => r.data.text);
 

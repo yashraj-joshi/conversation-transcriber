@@ -1,5 +1,5 @@
 // App-shell service worker: network-first for same-origin GETs, cache fallback when offline.
-const CACHE = 'ct-shell-v2';
+const CACHE = 'ct-shell-v3';
 const SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'app.js', 'auth.js', 'api.js', 'store.js',
   'recorder.js', 'importer.js', 'wav.js', 'pcm-worklet.js', 'manifest.webmanifest', 'icons/icon-192.png',

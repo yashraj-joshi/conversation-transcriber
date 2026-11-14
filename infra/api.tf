@@ -37,6 +37,9 @@ locals {
     "GET /transcripts/months",
     "GET /transcripts",
     "GET /transcript",
+    "POST /transcripts/delete",
+    "GET /transcripts/deleted",
+    "POST /transcripts/restore",
   ]
 }
 
